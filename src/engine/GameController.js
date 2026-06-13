@@ -355,6 +355,16 @@ export default class GameController {
     }
   }
 
+  keyForPlayer(key, playerIndex) {
+    if(!this.snakes || playerIndex < 0 || playerIndex >= this.snakes.length) return;
+
+    const snake = this.snakes[playerIndex];
+
+    if(snake != null && snake.lastKey != null && !snake.gameOver) {
+      snake.lastKey = key;
+    }
+  }
+
   getCurrentPlayer() {
     if(this.snakes != null) {
       const nbPlayers = this.getNBPlayer(GameConstants.PlayerType.HUMAN);

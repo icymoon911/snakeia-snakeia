@@ -367,11 +367,21 @@ export default class GameEngine {
     const nbHuman = this.getNBPlayer(GameConstants.PlayerType.HUMAN);
     const nbHybrid = this.getNBPlayer(GameConstants.PlayerType.HYBRID_HUMAN_AI);
     const totalHuman = nbHuman + nbHybrid;
-    const playerInput = (this.getPlayer(1, GameConstants.PlayerType.HYBRID_HUMAN_AI) ||
-                         this.getPlayer(1, GameConstants.PlayerType.HUMAN))?.lastKey;
+
+    // For multiple human players (local multiplayer), check if ANY human has input
+    let anyHumanInput = false;
+
+    if(totalHuman > 0) {
+      for(const snake of this.snakes) {
+        if((snake.player === GameConstants.PlayerType.HUMAN || snake.player === GameConstants.PlayerType.HYBRID_HUMAN_AI) && snake.lastKey !== -1) {
+          anyHumanInput = true;
+          break;
+        }
+      }
+    }
 
     return this.grid &&
-      (!isMaze || forceAuto || totalHuman === 0 || (totalHuman > 0 && playerInput !== -1));
+      (!isMaze || forceAuto || totalHuman === 0 || (totalHuman > 0 && anyHumanInput));
   }
 
   doTick() {

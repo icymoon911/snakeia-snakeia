@@ -19,11 +19,12 @@
 import GameConstants from "../Constants.js";
 import semver from "semver";
 import * as tf from "@tensorflow/tfjs";
+import SnakeAIUltraModelCache from "./SnakeAIUltraModelCache.js";
 
 export default class SnakeAIUltraModelLoader {
 
   static instance = null;
-  
+
   static modelCache = new Map();
   static metadataCache = new Map();
   static modelListCache = null;
@@ -38,6 +39,8 @@ export default class SnakeAIUltraModelLoader {
     }
 
     SnakeAIUltraModelLoader.instance = this;
+    this.indexedDBCache = new SnakeAIUltraModelCache();
+    this.indexedDBCacheReady = false;
   }
 
   static getInstance(fileReader) {
@@ -52,6 +55,17 @@ export default class SnakeAIUltraModelLoader {
     return SnakeAIUltraModelLoader.instance;
   }
 
+  async _ensureIndexedDBCache() {
+    if(!this.indexedDBCacheReady && this.indexedDBCache) {
+      try {
+        await this.indexedDBCache.init();
+        this.indexedDBCacheReady = true;
+      } catch(e) {
+        this.indexedDBCacheReady = false;
+      }
+    }
+  }
+
   async loadModel(location) {
     const modelLocation = `${location}/model.json`;
 
@@ -59,9 +73,55 @@ export default class SnakeAIUltraModelLoader {
       return SnakeAIUltraModelLoader.modelCache.get(modelLocation);
     }
 
+    // Try IndexedDB cache first
+    await this._ensureIndexedDBCache();
+
+    if(this.indexedDBCache && this.indexedDBCache.isAvailable) {
+      try {
+        const cached = await this.indexedDBCache.getCached(modelLocation);
+
+        if(cached && cached.artifacts) {
+          // Use tf.io.fromMemory or indexeddb:// protocol to restore
+          const ioHandler = tf.io.fromMemory(cached.artifacts.modelTopology, cached.artifacts.weightSpecs, cached.artifacts.weightData);
+          const model = await tf.loadLayersModel(ioHandler);
+
+          SnakeAIUltraModelLoader.modelCache.set(modelLocation, model);
+          return model;
+        }
+      } catch(e) {
+        // Fall back to HTTP load
+      }
+    }
+
+    // Try indexeddb:// handler (TensorFlow.js native support)
+    try {
+      const indexedDBUrl = `indexeddb://${modelLocation}`;
+      const model = await tf.loadLayersModel(indexedDBUrl);
+      SnakeAIUltraModelLoader.modelCache.set(modelLocation, model);
+      return model;
+    } catch(e) {
+      // indexeddb:// handler not available or model not cached, fall through
+    }
+
+    // Fall back to HTTP load
     const model = await tf.loadLayersModel(modelLocation);
 
     SnakeAIUltraModelLoader.modelCache.set(modelLocation, model);
+
+    // Cache to IndexedDB for next time
+    if(this.indexedDBCache && this.indexedDBCache.isAvailable) {
+      try {
+        const saveResult = await model.save(`indexeddb://${modelLocation}`);
+        // Also store metadata
+        await this.indexedDBCache.putCached(modelLocation, {
+          loaded: true,
+          timestamp: Date.now(),
+          saveResult: saveResult ? true : false
+        });
+      } catch(e) {
+        // Caching failed, not critical
+      }
+    }
 
     return model;
   }

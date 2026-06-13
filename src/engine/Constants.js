@@ -118,6 +118,24 @@ export default {
     LEFT: 37,
     ENTER: 13
   },
+  WASD: {
+    W: 87,
+    A: 65,
+    S: 83,
+    D: 68
+  },
+  WASDToArrow: {
+    87: 38,  // W -> UP
+    65: 37,  // A -> LEFT
+    83: 40,  // S -> BOTTOM
+    68: 39   // D -> RIGHT
+  },
+  ArrowToWASD: {
+    38: 87,  // UP -> W
+    37: 65,  // LEFT -> A
+    40: 83,  // BOTTOM -> S
+    39: 68   // RIGHT -> D
+  },
   ActionMapping: {
     38: 0,
     39: 1,
