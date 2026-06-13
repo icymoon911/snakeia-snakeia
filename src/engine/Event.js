@@ -22,7 +22,37 @@ export default class Event {
     this.callbacks = [];
   }
 
-  registerCallback(callback) {
-    this.callbacks.push(callback);
+  registerCallback(callback, once = false) {
+    if(typeof callback !== "function") return;
+    this.callbacks.push({ fn: callback, once });
+  }
+
+  unregisterCallback(callback) {
+    this.callbacks = this.callbacks.filter(entry => entry.fn !== callback);
+  }
+
+  dispatch(eventArgs) {
+    const toRemove = [];
+
+    for(let i = 0, l = this.callbacks.length; i < l; i++) {
+      const entry = this.callbacks[i];
+      entry.fn(eventArgs);
+
+      if(entry.once) {
+        toRemove.push(i);
+      }
+    }
+
+    for(let i = toRemove.length - 1; i >= 0; i--) {
+      this.callbacks.splice(toRemove[i], 1);
+    }
+  }
+
+  clear() {
+    this.callbacks = [];
+  }
+
+  get listenerCount() {
+    return this.callbacks.length;
   }
 }

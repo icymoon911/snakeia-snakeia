@@ -30,7 +30,7 @@ export default class SnakeAILow extends SnakeAI {
   }
 
   ai(snake) {
-    super.ai(snake);
+    this.computeFruitGoals(snake);
 
     const head = snake.getHeadPosition();
     const fruitGoal = this.targetFruit ?? this.aiFruitGoalsSorted[0];

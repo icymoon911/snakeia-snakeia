@@ -18,13 +18,32 @@
  */
 import GameConstants from "../Constants.js";
 
+/**
+ * Base class for all Snake AI strategies (Strategy Pattern).
+ *
+ * Subclasses MUST override the `ai(snake)` method to implement
+ * their decision logic. The base implementation is a passive no-op
+ * used as the default AI for human-controlled snakes.
+ *
+ * AI subclasses that need fruit goal information should call
+ * `this.computeFruitGoals(snake)` at the start of their `ai()` method,
+ * which populates `this.aiFruitGoalsSorted` and `this.targetFruit`.
+ */
 export default class SnakeAI {
   constructor() {
     this.aiFruitGoalsSorted = [];
+    this.targetFruit = null;
     this.aiLevelText = "custom";
   }
 
-  ai(snake) {
+  /**
+   * Compute and sort fruit goals for the given snake.
+   * Populates this.aiFruitGoalsSorted and this.targetFruit.
+   * Call this from subclass ai() methods instead of super.ai(snake).
+   * @param {Snake} snake - The snake to compute goals for
+   * @returns {Array} Sorted array of fruit goal objects
+   */
+  computeFruitGoals(snake) {
     const currentPosition = snake.getHeadPosition();
     const fruitPositions = snake.grid.fruitPositions || [];
     const fruitPosGold = snake.grid.fruitPosGold;
@@ -54,7 +73,19 @@ export default class SnakeAI {
     });
 
     this.aiFruitGoalsSorted = goals;
+    this.targetFruit = goals.length > 0 ? goals[0] : null;
 
+    return goals;
+  }
+
+  /**
+   * Decide the next move direction for the snake.
+   * Subclasses MUST override this method.
+   * Base implementation is a passive no-op for human-controlled snakes.
+   * @param {Snake} snake - The snake to decide for
+   * @returns {number|null} Key direction constant, or null for no action
+   */
+  ai(snake) { // eslint-disable-line no-unused-vars
     return null;
   }
 }

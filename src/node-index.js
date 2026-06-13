@@ -21,6 +21,10 @@ import GameConstants from "./engine/Constants.js";
 import Event from "./engine/Event.js";
 import Reactor from "./engine/Reactor.js";
 import Grid from "./engine/Grid.js";
+import FruitManager from "./engine/FruitManager.js";
+import MazeGenerator from "./engine/MazeGenerator.js";
+import PathFinder from "./engine/PathFinder.js";
+import MovementHandler from "./engine/MovementHandler.js";
 import Snake from "./engine/Snake.js";
 import GameGroup from "./engine/GameGroup.js";
 import GameUtils from "./engine/GameUtils.js";
@@ -28,4 +32,4 @@ import Position from "./engine/Position.js";
 import GameEngine from "./engine/GameEngine.js";
 import SnakeAIUltraModelLoader from "./engine/ai/SnakeAIUltraModelLoader.js";
 
-export { GameConstants, Event, Reactor, Grid, Snake, GameGroup, GameUtils, Position, GameEngine, SnakeAIUltraModelLoader };
+export { GameConstants, Event, Reactor, Grid, FruitManager, MazeGenerator, PathFinder, MovementHandler, Snake, GameGroup, GameUtils, Position, GameEngine, SnakeAIUltraModelLoader };

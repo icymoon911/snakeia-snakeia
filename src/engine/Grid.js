@@ -20,7 +20,9 @@ import GameUtils from "./GameUtils.js";
 import GameConstants from "./Constants.js";
 import Position from "./Position.js";
 import seedrandom from "seedrandom";
-import Lowlight from "../../libs/lowlight.astar.min.js";
+import FruitManager from "./FruitManager.js";
+import MazeGenerator from "./MazeGenerator.js";
+import PathFinder from "./PathFinder.js";
 
 export default class Grid {
   constructor(width, height, generateWalls, borderWalls, maze, customGrid, mazeForceAuto, seedGrid, seedGame, probGoldFruitIncrease) {
@@ -80,7 +82,7 @@ export default class Grid {
       }
 
       if(this.maze) {
-        this.generateMaze();
+        MazeGenerator.generate(this);
       } else if(this.generateWalls) {
         this.fixWalls(this.borderWalls);
       }
@@ -130,60 +132,7 @@ export default class Grid {
     }
   }
 
-  mazeRecursion(r, c) {
-    const directions = GameUtils.shuffle([GameConstants.Direction.UP, GameConstants.Direction.RIGHT, GameConstants.Direction.BOTTOM, GameConstants.Direction.LEFT], this.rngGrid);
-
-    for(let i = 0; i < directions.length; i++) {
-      switch(directions[i]) {
-      case GameConstants.Direction.UP:
-        if(r - 2 <= 0) continue;
-
-        if(this.get(new Position(c, r - 2)) != GameConstants.CaseType.EMPTY) {
-          this.set(GameConstants.CaseType.EMPTY, new Position(c, r - 2));
-          this.set(GameConstants.CaseType.EMPTY, new Position(c, r - 1));
-          this.mazeRecursion(r - 2, c);
-        }
-
-        break;
-      case GameConstants.Direction.RIGHT:
-        if(c + 2 >= this.width - 1) continue;
-
-        if(this.get(new Position(c + 2, r)) != GameConstants.CaseType.EMPTY) {
-          this.set(GameConstants.CaseType.EMPTY, new Position(c + 2, r));
-          this.set(GameConstants.CaseType.EMPTY, new Position(c + 1, r));
-          this.mazeRecursion(r, c + 2);
-        }
-
-        break;
-      case GameConstants.Direction.BOTTOM:
-        if(r + 2 >= this.height - 1) continue;
-
-        if(this.get(new Position(c, r + 2)) != GameConstants.CaseType.EMPTY) {
-          this.set(GameConstants.CaseType.EMPTY, new Position(c, r + 2));
-          this.set(GameConstants.CaseType.EMPTY, new Position(c, r + 1));
-          this.mazeRecursion(r + 2, c);
-        }
-
-        break;
-      case GameConstants.Direction.LEFT:
-        if(c - 2 <= 0) continue;
-
-        if(this.get(new Position(c - 2, r)) != GameConstants.CaseType.EMPTY) {
-          this.set(GameConstants.CaseType.EMPTY, new Position(c - 2, r));
-          this.set(GameConstants.CaseType.EMPTY, new Position(c - 1, r));
-          this.mazeRecursion(r, c - 2);
-        }
-
-        break;
-      }
-    }
-  }
-
-  generateMaze() {
-    this.mazeFirstPosition = new Position(1, 1, GameConstants.Direction.RIGHT);
-    this.set(GameConstants.CaseType.EMPTY, this.mazeFirstPosition);
-    this.mazeRecursion(1, 1);
-  }
+  // --- Grid data access ---
 
   set(value, position) {
     this.grid[position.y][position.x] = value;
@@ -205,104 +154,35 @@ export default class Grid {
     return GameUtils.getImageCase(this.get(position));
   }
 
-  getGraph(ignoreSnakePos) {
-    const res = new Array(this.height);
-
-    for(let i = 0; i < this.height; i++) {
-      res[i] = new Array(this.width);
-
-      for(let j = 0; j < this.width; j++) {
-        const currentPos = new Position(j, i);
-
-        if(ignoreSnakePos && this.get(currentPos) == GameConstants.CaseType.SNAKE) {
-          res[i][j] = 0;
-        } else if(this.isDeadPosition(currentPos)) {
-          res[i][j] = 1;
-        } else {
-          res[i][j] = 0;
-        }
-      }
-    }
-
-    return res;
-  }
-
   getRandomPosition() {
     return new Position(GameUtils.randRange(0, this.width - 1, this.rngGame), GameUtils.randRange(0, this.height - 1, this.rngGame));
   }
 
+  // --- Pathfinding (delegates to PathFinder) ---
+
+  getGraph(ignoreSnakePos) {
+    return PathFinder.buildGraph(this, ignoreSnakePos);
+  }
+
+  // --- Fruit management (delegates to FruitManager) ---
+
   setFruits(numberPlayers) {
-    const tried = [1];
-    const fruitCountToSpawn = Math.min(numberPlayers, GameConstants.Setting.MAX_FRUITS_PER_GRID);
-
-    if(this.getTotal(GameConstants.CaseType.EMPTY) > 0 && this.fruitPositions.length < fruitCountToSpawn) {
-      let errorSettingFruit = false;
-
-      do {
-        errorSettingFruit = !this.setSingleFruit(tried, false);
-      } while(!errorSettingFruit && this.fruitPositions.length < fruitCountToSpawn);
-    }
-
-    const probaSetGoldFruit = this.probGoldFruitIncrease ? 3 :
-      (numberPlayers > 1 ? GameConstants.Setting.PROB_GOLD_FRUIT_MULTIPLE_PLAYERS : GameConstants.Setting.PROB_GOLD_FRUIT_1_PLAYER);
-    const shouldSetGoldFruit = GameUtils.randRange(1, probaSetGoldFruit, this.rngGame) == 1;
-
-    if(!this.maze && this.fruitPosGold == null && shouldSetGoldFruit) {
-      this.setSingleFruit(tried, true);
-    }
+    FruitManager.setFruits(this, numberPlayers);
   }
 
   setSingleFruit(tried, gold) {
-    let randomPos, isCorridor;
-
-    do {
-      randomPos = this.getRandomPosition();
-      isCorridor = this.detectCorridor(randomPos);
-
-      if(isCorridor && this.get(randomPos) == GameConstants.CaseType.EMPTY) {
-        this.set(GameConstants.CaseType.SURROUNDED, randomPos);
-      }
-
-      if(this.getTotal(GameConstants.CaseType.EMPTY) <= 0) {
-        return false;
-      }
-    } while(this.get(randomPos) != GameConstants.CaseType.EMPTY || this.isFruitSurrounded(randomPos, true) || (this.maze && !this.testFruitMaze(randomPos, tried)) || isCorridor);
-
-    if(gold) {
-      this.fruitPosGold = randomPos;
-      this.set(GameConstants.CaseType.FRUIT_GOLD, randomPos);
-    } else {
-      this.fruitPositions.push(randomPos);
-      this.set(GameConstants.CaseType.FRUIT, randomPos);
-    }
-
-    return true;
+    return FruitManager.setSingleFruit(this, tried, gold);
   }
 
   removeFruit(fruitPosition) {
-    this.set(GameConstants.CaseType.EMPTY, fruitPosition);
-    this.fruitPositions = this.fruitPositions.filter(position => !fruitPosition.equals(position));
+    FruitManager.removeFruit(this, fruitPosition);
   }
 
-  testFruitMaze(position, tried) { // Maze mode: avoid putting the fruit too close to the Snake
-    const grid = this.getGraph(true);
-    const graph = new Lowlight.Astar.Configuration(grid, {
-      order: "yx",
-      torus: false,
-      diagonals: false,
-      cutting: false,
-      cost(a, b) { return b == 1 ? null : 1; }
-    });
-    const path = graph.path({x: this.mazeFirstPosition.x, y: this.mazeFirstPosition.y}, {x: position.x, y: position.y});
-
-    if(path.length < Math.ceil(this.getTotal(GameConstants.CaseType.EMPTY) / (1 * Math.ceil(tried[0] / 4)))) {
-      tried[0]++;
-      return false;
-    } else {
-      tried[0]++;
-      return true;
-    }
+  testFruitMaze(position, tried) {
+    return PathFinder.testFruitMaze(this, position, tried);
   }
+
+  // --- Spatial analysis ---
 
   isCaseSurrounded(position, fill, foundVals, forbiddenVals) {
     if(!position) return false;
@@ -335,7 +215,7 @@ export default class Grid {
           if(found.has(nextValue)) {
             return false;
           }
-          
+
           visited.add(positionKey);
           checkList.push(nextPosition);
 
@@ -399,6 +279,8 @@ export default class Grid {
     return false;
   }
 
+  // --- Grid queries ---
+
   getOnLine(type, line) {
     let tot = 0;
 
@@ -420,6 +302,8 @@ export default class Grid {
 
     return tot;
   }
+
+  // --- Position/direction utilities ---
 
   getNextPosition(oldPos, newDirection) {
     const position = new Position(oldPos.x, oldPos.y, newDirection);

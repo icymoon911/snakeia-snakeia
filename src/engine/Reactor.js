@@ -24,18 +24,63 @@ export default class Reactor {
   }
 
   registerEvent(eventName) {
-    this.events[eventName] = new Event(eventName);
+    if(!this.events[eventName]) {
+      this.events[eventName] = new Event(eventName);
+    }
   }
 
   dispatchEvent(eventName, eventArgs) {
-    const callbacks = this.events[eventName].callbacks;
-    
-    for(let i = 0, l = callbacks.length; i < l; i++) {
-      callbacks[i](eventArgs);
+    const event = this.events[eventName];
+
+    if(event) {
+      event.dispatch(eventArgs);
     }
   }
 
   addEventListener(eventName, callback) {
-    this.events[eventName].registerCallback(callback);
+    const event = this.events[eventName];
+
+    if(event) {
+      event.registerCallback(callback, false);
+    }
+  }
+
+  once(eventName, callback) {
+    const event = this.events[eventName];
+
+    if(event) {
+      event.registerCallback(callback, true);
+    }
+  }
+
+  off(eventName, callback) {
+    const event = this.events[eventName];
+
+    if(event) {
+      if(callback) {
+        event.unregisterCallback(callback);
+      } else {
+        event.clear();
+      }
+    }
+  }
+
+  removeAllListeners(eventName) {
+    if(eventName) {
+      const event = this.events[eventName];
+
+      if(event) {
+        event.clear();
+      }
+    } else {
+      for(const name of Object.keys(this.events)) {
+        this.events[name].clear();
+      }
+    }
+  }
+
+  listenerCount(eventName) {
+    const event = this.events[eventName];
+    return event ? event.listenerCount : 0;
   }
 }
