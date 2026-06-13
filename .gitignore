@@ -1,6 +1,8 @@
-angle-tests.txt
-node_modules
-/models/logs/*
-*.cpuprofile
-.vscode
-/models/
+__pycache__/
+*.py[cod]
+node_modules/
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
