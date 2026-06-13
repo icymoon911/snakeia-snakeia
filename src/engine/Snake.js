@@ -406,7 +406,11 @@ export default class Snake {
     const head = this.getHeadPosition();
     const posKey = `${head.x},${head.y},${head.direction}`;
 
-    if(this.lastPositions.includes(posKey)) {
+    // Only check recent positions within a sliding window to avoid false positives
+    // when the AI is navigating complex paths (e.g., chasing gold fruit through corridors)
+    const recentWindow = this.lastPositions.slice(-this.maxLastMoves);
+
+    if(recentWindow.includes(posKey)) {
       this.stuckCounter++;
     } else {
       this.stuckCounter = Math.max(0, this.stuckCounter - 1);

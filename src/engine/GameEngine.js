@@ -183,11 +183,11 @@ export default class GameEngine {
     this.aiStuck = false;
 
     if(this.grid.seedGrid) {
-      this.grid.seedGrid = "" + (parseInt(this.grid.seedGrid) + 1);
+      this.grid.seedGrid = this.incrementSeed(this.grid.seedGrid);
     }
 
     if(this.grid.seedGame) {
-      this.grid.seedGame = "" + (parseInt(this.grid.seedGame) + 1);
+      this.grid.seedGame = this.incrementSeed(this.grid.seedGame);
     }
 
     await this.initGridAndSnakes();
@@ -287,9 +287,9 @@ export default class GameEngine {
       }
 
       this.clearIntervalPlay();
+      this.reactor.dispatchEvent("onKill");
       this.grid = null;
       this.snakes = null;
-      this.reactor.dispatchEvent("onKill");
     }
   }
 
@@ -381,6 +381,7 @@ export default class GameEngine {
 
     if(this.shouldUpdateEngine()) {
       let scoreIncreased;
+      const consumedFruitPositions = new Set();
 
       this.ticks++;
 
@@ -394,15 +395,29 @@ export default class GameEngine {
           const headSnakePos = this.moveSnake(snake, initialDirection);
 
           if(headSnakePos) {
-            if(this.grid.isDeadPosition(headSnakePos)) {
+            const posKey = headSnakePos.x + "," + headSnakePos.y;
+            const fruitAlreadyConsumed = consumedFruitPositions.has(posKey);
+
+            if(fruitAlreadyConsumed) {
+              // Fruit at this position was already eaten by another snake this tick.
+              // Treat as a normal move: insert head and remove tail (no growth, no death).
+              snake.insert(headSnakePos);
+
+              if(!this.grid.maze) {
+                snake.remove();
+                snake.lastTailMoved = true;
+                snake.lastHeadMoved = true;
+              }
+            } else if(this.grid.isDeadPosition(headSnakePos)) {
               snake.setGameOver(this.ticks);
             } else {
               const { scoreHasIncreased, setFruits } = this.handleSnakeMoveResult(headSnakePos, snake);
-  
+
               if(scoreHasIncreased) {
                 scoreIncreased = true;
+                consumedFruitPositions.add(posKey);
               }
-  
+
               // Set a new fruit if the current fruit is eaten
               if(!this.scoreMax && setFruits && !this.clientSidePredictionsMode) {
                 this.grid.setFruits(this.getNBPlayerAlive());
@@ -526,9 +541,21 @@ export default class GameEngine {
 
   handleSpeedIncrease(snake) {
     if(this.snakes.length <= 1 && this.progressiveSpeed && snake.score > 0 && this.initialSpeed > 1) {
+      const minSpeed = Math.max(2, Math.ceil(this.initialSpeedUntouched * 0.25));
       this.initialSpeed = Math.ceil(((-this.initialSpeedUntouched / 100) * snake.score) + this.initialSpeedUntouched);
-      this.initialSpeed = this.initialSpeed < 1 ? 1 : this.initialSpeed;
+      this.initialSpeed = this.initialSpeed < minSpeed ? minSpeed : this.initialSpeed;
     }
+  }
+
+  incrementSeed(seed) {
+    const seedStr = "" + seed;
+    const match = seedStr.match(/^(.*?)(\d+)$/);
+
+    if(match) {
+      return match[1] + (parseInt(match[2]) + 1);
+    }
+
+    return seedStr + "1";
   }
 
   handleStuckFruits() {
