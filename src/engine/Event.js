@@ -16,6 +16,15 @@
  * You should have received a copy of the GNU General Public License
  * along with "SnakeIA".  If not, see <http://www.gnu.org/licenses/>.
  */
+
+/**
+ * Lightweight event descriptor.
+ *
+ * Retained for backward-compatibility: external code may still import this class
+ * and read its `callbacks` array or call `registerCallback(fn)`.
+ *
+ * For new code, prefer using Reactor directly (on / once / off / emit).
+ */
 export default class Event {
   constructor(name) {
     this.name = name;
@@ -23,6 +32,20 @@ export default class Event {
   }
 
   registerCallback(callback) {
-    this.callbacks.push(callback);
+    if (typeof callback === "function" && !this.callbacks.includes(callback)) {
+      this.callbacks.push(callback);
+    }
+  }
+
+  removeCallback(callback) {
+    this.callbacks = this.callbacks.filter((cb) => cb !== callback);
+  }
+
+  dispatch(...args) {
+    const snapshot = this.callbacks.slice();
+
+    for (let i = 0, l = snapshot.length; i < l; i++) {
+      snapshot[i](...args);
+    }
   }
 }

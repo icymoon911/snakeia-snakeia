@@ -34,7 +34,7 @@ export default class SnakeAINormal extends SnakeAI {
   }
 
   ai(snake) {
-    super.ai(snake);
+    this.computeFruitGoals(snake);
 
     if(this.shouldUpdatePath(snake)) {
       const { calculatedPath, targetFruit } = this.updatePath(snake);

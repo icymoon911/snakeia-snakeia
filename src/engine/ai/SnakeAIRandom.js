@@ -28,7 +28,7 @@ export default class SnakeAIRandom extends SnakeAI {
   }
 
   ai(snake) {
-    super.ai(snake);
+    this.computeFruitGoals(snake);
 
     const currentPosition = snake.getHeadPosition();
     const top = snake.grid.isDeadPosition(snake.getNextPosition(currentPosition, GameConstants.Key.UP));
