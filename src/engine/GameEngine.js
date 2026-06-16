@@ -381,6 +381,7 @@ export default class GameEngine {
 
     if(this.shouldUpdateEngine()) {
       let scoreIncreased;
+      let needsFruitReconciliation = false;
 
       this.ticks++;
 
@@ -396,20 +397,33 @@ export default class GameEngine {
           if(headSnakePos) {
             if(this.grid.isDeadPosition(headSnakePos)) {
               snake.setGameOver(this.ticks);
+              // A snake died → alive count changed, fruit count may need adjustment
+              needsFruitReconciliation = true;
             } else {
               const { scoreHasIncreased, setFruits } = this.handleSnakeMoveResult(headSnakePos, snake);
-  
+
               if(scoreHasIncreased) {
                 scoreIncreased = true;
               }
-  
-              // Set a new fruit if the current fruit is eaten
+
+              // Set a new fruit if the current fruit is eaten.
+              // Each snake that eats a fruit triggers its own placement call
+              // so that multiple snakes eating in the same tick each get
+              // a replacement fruit placed immediately.
               if(!this.scoreMax && setFruits && !this.clientSidePredictionsMode) {
                 this.grid.setFruits(this.getNBPlayerAlive());
               }
             }
           }
         }
+      }
+
+      // Post-loop reconciliation: ensure the fruit count on the grid matches
+      // the current alive player count. This handles cases where snakes died
+      // during the tick (reducing alive count) or where fruit placement
+      // temporarily failed. Only tops up — never removes excess fruits.
+      if(!this.scoreMax && !this.clientSidePredictionsMode && needsFruitReconciliation) {
+        this.grid.setFruits(this.getNBPlayerAlive());
       }
 
       // Check if the game should end
@@ -532,12 +546,21 @@ export default class GameEngine {
   }
 
   handleStuckFruits() {
-    // If the fruit is in a corridor, we set it in a new cell
+    // Collect stuck fruits first to avoid modifying the array during iteration.
+    // removeFruit replaces fruitPositions with a new filtered array, which would
+    // cause a for...of loop to iterate over stale data and skip elements.
+    const fruitsToRemove = [];
+
     for(const fruitPos of this.grid.fruitPositions) {
       if(!this.scoreMax && (this.grid.detectCorridor(fruitPos) || this.grid.isFruitSurrounded(fruitPos, true)) && !this.clientSidePredictionsMode) {
-        this.grid.removeFruit(fruitPos);
-        this.grid.setFruits(this.getNBPlayerAlive());
+        fruitsToRemove.push(fruitPos);
       }
+    }
+
+    // Now remove stuck fruits and replace them with new ones
+    for(const fruitPos of fruitsToRemove) {
+      this.grid.removeFruit(fruitPos);
+      this.grid.setFruits(this.getNBPlayerAlive());
     }
 
     // If gold fruit is in a corridor, we remove it
@@ -562,8 +585,12 @@ export default class GameEngine {
   checkEndGameCondition() {
     let nbOver = 0;
 
-    let allActiveAIAreStuck = true;
-    let allActiveAIAreFullyStuck = true;
+    // Track AI stuck status separately from game-over counting so that
+    // allActiveAIAreFullyStuck is never left at its initial value when
+    // every snake is already game-over (vacuous truth bug).
+    let activeAICount = 0;
+    let partiallyStuckAICount = 0;
+    let fullyStuckAICount = 0;
     let humanPlayerActive = false;
 
     for(const snake of this.snakes) {
@@ -575,18 +602,27 @@ export default class GameEngine {
 
         if(isHumanPlayer) {
           humanPlayerActive = true;
-        }
-        
-        if(!isPartiallyStuck) {
-          allActiveAIAreStuck = false;
-          allActiveAIAreFullyStuck = false;
-        } else if(!isFullyStuck) {
-          allActiveAIAreFullyStuck = false;
+        } else {
+          activeAICount++;
+
+          if(isPartiallyStuck) {
+            partiallyStuckAICount++;
+          }
+
+          if(isFullyStuck) {
+            fullyStuckAICount++;
+          }
         }
       }
     }
 
-    const shouldEndGame = nbOver >= this.snakes.length || (allActiveAIAreFullyStuck && !humanPlayerActive);
+    // Only consider AIs stuck when there is at least one active AI;
+    // otherwise the "all stuck" flags would vacuously stay true.
+    const allActiveAIAreStuck = activeAICount > 0 && partiallyStuckAICount === activeAICount;
+    const allActiveAIAreFullyStuck = activeAICount > 0 && fullyStuckAICount === activeAICount;
+    const allSnakesOver = nbOver >= this.snakes.length;
+
+    const shouldEndGame = allSnakesOver || (allActiveAIAreFullyStuck && !humanPlayerActive);
 
     this.aiStuck = allActiveAIAreStuck && !humanPlayerActive && !shouldEndGame;
 
