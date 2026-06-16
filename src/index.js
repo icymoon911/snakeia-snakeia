@@ -39,9 +39,13 @@ import OnlineClient from "./engine/OnlineClient.js";
 import SnakeAIUltraModelLoader from "./engine/ai/SnakeAIUltraModelLoader.js";
 import ReplayRecorder from "./engine/ReplayRecorder.js";
 import ReplayPlayer from "./engine/ReplayPlayer.js";
+import ReplayController from "./ui/ReplayUI.js";
 import MapEditor from "./engine/MapEditor.js";
 import LocalMultiplayer from "./engine/LocalMultiplayer.js";
 import SnakeAIUltraModelCache from "./engine/ai/SnakeAIUltraModelCache.js";
 import OnlineLeaderboard from "./engine/OnlineLeaderboard.js";
 
-export { GameConstants, Event, Reactor, Grid, Snake, GameGroup, GameUtils, Position, GameEngine, Game, GameController, GameControllerWorker, GameControllerSocket, GameUI, OnlineClient, SnakeAIUltraModelLoader, ReplayRecorder, ReplayPlayer, MapEditor, LocalMultiplayer, SnakeAIUltraModelCache, OnlineLeaderboard };
+// GameRecorder is an alias for ReplayRecorder (legacy name)
+const GameRecorder = ReplayRecorder;
+
+export { GameConstants, Event, Reactor, Grid, Snake, GameGroup, GameUtils, Position, GameEngine, Game, GameController, GameControllerWorker, GameControllerSocket, GameUI, OnlineClient, SnakeAIUltraModelLoader, ReplayRecorder, ReplayPlayer, ReplayController, GameRecorder, MapEditor, LocalMultiplayer, SnakeAIUltraModelCache, OnlineLeaderboard };

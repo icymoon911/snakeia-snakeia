@@ -22,6 +22,7 @@ import GraphicsUtils from "./GraphicsUtils";
 import GameConstants from "../engine/Constants";
 import GameRanking from "./GameRanking";
 import ModelLoader from "./ModelLoader";
+import ReplayController from "./ReplayUI";
 import { ImageLoader, Button, ButtonImage, NotificationMessage, Utils, Menu, Label, ProgressBar, Constants, EasingFunctions, Component } from "jsgametools";
 import GridUI from "./GridUI";
 import GridUI3D from "./GridUI3D";
@@ -155,6 +156,19 @@ export default class GameUI {
     this.btnStartGame;
     this.btnRank;
 
+    // Replay mode
+    this.replayMode = false;
+    this.replayController = new ReplayController(this);
+    this.btnWatchReplay;
+    this.btnReplayPlayPause;
+    this.btnReplayPrev;
+    this.btnReplayNext;
+    this.btnReplaySpeed;
+    this.btnReplayExit;
+    this.btnReplayExport;
+    this.btnReplayImport;
+    this.replayProgressBar;
+
     // Patch to fix mouse position on high DPI screens, need to be removed if upgrading JSGameTools
     Component.prototype.getMousePos = (canvas, event) => {
       const rect = canvas.getBoundingClientRect();
@@ -222,6 +236,50 @@ export default class GameUI {
       this.btnExitFullScreen = new Button(i18next.t("engine.exitFullScreen"), null, null, "center", "#3498db", "#246A99", "#184766");
       this.btnEnterFullScreen = new Button(i18next.t("engine.enterFullScreen"), null, null, "center", "#3498db", "#246A99", "#184766");
       this.btnStartGame = new Button(i18next.t("engine.servers.startGame"), null, null, "center", "#3498db", "#246A99", "#184766");
+
+      // Replay buttons - created disabled; enabled only during replay mode
+      this.btnWatchReplay = new Button("Watch Replay", null, null, "center", "#27ae60", "#1e8449", "#145a32");
+      this.btnReplayPlayPause = new Button("Play", null, null, "left", "#3498db", "#246A99", "#184766");
+      this.btnReplayPrev = new Button("Prev", null, null, "left", "#3498db", "#246A99", "#184766");
+      this.btnReplayNext = new Button("Next", null, null, "left", "#3498db", "#246A99", "#184766");
+      this.btnReplaySpeed = new Button("1x", null, null, "left", "#9b59b6", "#7d3c98", "#6c3483");
+      this.btnReplayExit = new Button("Exit", null, null, "left", "#e74c3c", "#c0392b", "#a93226");
+      this.btnReplayExport = new Button("Save", null, null, "left", "#27ae60", "#1e8449", "#145a32");
+      this.btnReplayImport = new Button("Load", null, null, "left", "#f39c12", "#d68910", "#b9770e");
+      this.replayProgressBar = new ProgressBar(null, null, 200, 12, "#bdc3c7", "#27ae60", 0, 0, true, "left");
+
+      // Wire up replay button actions
+      this.btnReplayPlayPause.setClickAction(() => {
+        this.replayController.togglePlayPause();
+      });
+      this.btnReplayPrev.setClickAction(() => {
+        this.replayController.prevFrame();
+      });
+      this.btnReplayNext.setClickAction(() => {
+        this.replayController.nextFrame();
+      });
+      this.btnReplaySpeed.setClickAction(() => {
+        this.replayController.cycleSpeed();
+      });
+      this.btnReplayExit.setClickAction(() => {
+        this.stopReplayMode();
+      });
+      this.btnReplayExport.setClickAction(() => {
+        this.replayController.exportReplay();
+      });
+      this.btnReplayImport.setClickAction(() => {
+        this.replayController.importReplayFromFile().catch(() => {});
+      });
+
+      // Disable all replay buttons initially (enabled only during replay mode)
+      this.btnReplayPlayPause.disable();
+      this.btnReplayPrev.disable();
+      this.btnReplayNext.disable();
+      this.btnReplaySpeed.disable();
+      this.btnReplayExit.disable();
+      this.btnReplayExport.disable();
+      this.btnReplayImport.disable();
+      this.replayProgressBar.disable();
       this.labelMenus = new Label("", null, null, GameConstants.Setting.FONT_SIZE * dpr, GameConstants.Setting.FONT_FAMILY, "white", "center");
       this.progressBarLoading = new ProgressBar(null, null, (this.canvasWidth / 4) * dpr, 25 * dpr, null, null, null, 0.5, this.disableAnimation, "center");
 
@@ -313,6 +371,17 @@ export default class GameUI {
           touchSwipeEvent(event);
           event.preventDefault();
         });
+
+        // Replay progress bar seeking (mouse + touch)
+        this._replaySeekHandler = (evt) => {
+          if (this.replayMode && this.replayController.isActive) {
+            const clientX = evt.touches ? evt.touches[0].clientX : evt.clientX;
+            const clientY = evt.touches ? evt.touches[0].clientY : evt.clientY;
+            this.replayController.handleCanvasClick(clientX, clientY, this.canvas);
+          }
+        };
+        this.canvas.addEventListener("mousedown", this._replaySeekHandler);
+        this.canvas.addEventListener("touchstart", this._replaySeekHandler, { passive: true });
       }
     }
     
@@ -321,6 +390,23 @@ export default class GameUI {
 
     this.listenerKeyDown = (evt) => {
       if(!this.killed) {
+        // Replay mode keyboard shortcuts
+        if(this.replayMode && this.replayController.isActive) {
+          if(evt.keyCode === 32) { // Space
+            this.replayController.togglePlayPause();
+          } else if(evt.keyCode === 37) { // Left arrow
+            this.replayController.prevFrame();
+          } else if(evt.keyCode === 39) { // Right arrow
+            this.replayController.nextFrame();
+          } else if(evt.keyCode === 83 || evt.keyCode === 87) { // S or W - cycle speed
+            this.replayController.cycleSpeed();
+          } else if(evt.keyCode === 27 || evt.keyCode === 81 || evt.keyCode === 69) { // Escape, Q, or E - exit replay
+            this.stopReplayMode();
+          }
+          evt.preventDefault();
+          return;
+        }
+
         let keyCode = evt.keyCode;
     
         if(keyCode == 90 || keyCode == 87) keyCode = GameConstants.Key.UP; // W or Z
@@ -524,6 +610,7 @@ export default class GameUI {
   }
 
   reset() {
+    this.stopReplayMode();
     this.controller && this.controller.reset();
   }
 
@@ -548,6 +635,7 @@ export default class GameUI {
   }
 
   exit() {
+    this.stopReplayMode();
     this.controller && this.controller.exit();
   }
 
@@ -556,6 +644,7 @@ export default class GameUI {
   }
 
   setKill() {
+    this.stopReplayMode();
     this.killed = true;
     this.clearIntervalCountFPS();
 
@@ -752,12 +841,14 @@ export default class GameUI {
         this.frame++;
   
         if((!this.paused && !this.onlineMode) || this.onlineMode || this.gameOver || this.gameFinished) {
-          this.offsetFrame += offsetFrame;
-          const offset = this.offsetFrame / (this.speed * GameConstants.Setting.TIME_MULTIPLIER);
+          if(!this.replayMode) {
+            this.offsetFrame += offsetFrame;
+            const offset = this.offsetFrame / (this.speed * GameConstants.Setting.TIME_MULTIPLIER);
 
-          if((this.gameOver || this.gameFinished) && offset >= 0.95) {
-            this.offsetFrame = 0;
-            this.ticks++;
+            if((this.gameOver || this.gameFinished) && offset >= 0.95) {
+              this.offsetFrame = 0;
+              this.ticks++;
+            }
           }
         }
   
@@ -915,207 +1006,253 @@ export default class GameUI {
 
       this.disableAllButtons();
 
-      if(this.searchingPlayers && this.lastTime > 0) {
-        this.timeStart -= Math.max(0, Date.now() - this.lastTime);
-      } else {
-        this.timeStart = 0;
-      }
+      if(this.replayMode && this.replayController.isActive) {
+        // --- Replay mode: enable and render replay controls ----------------
+        this.btnReplayPlayPause.enable();
+        this.btnReplayPrev.enable();
+        this.btnReplayNext.enable();
+        this.btnReplaySpeed.enable();
+        this.btnReplayExit.enable();
+        this.btnReplayExport.enable();
+        this.btnReplayImport.enable();
+        this.replayProgressBar.enable();
 
-      const nextGameText = (this.timeStart > 0 ? ("\n\n" + i18next.t("engine.servers.nextGameStart") + " " + GameUtils.millisecondsFormat(this.timeStart)) : "");
-
-      if(this.exited) {
-        this.labelMenus.text = i18next.t("engine.exited");
-        this.labelMenus.color = "white";
-        this.fullscreen ? this.menu.set(this.labelMenus, this.btnExitFullScreen) : this.menu.set(this.labelMenus);
-        
-        this.btnExitFullScreen.setClickAction(() => {
-          this.toggleFullscreen();
-        });
-      } else if(this.errorOccurred || this.loadingResourcesErrorOccurred) {
-        this.labelMenus.text = this.loadingResourcesErrorOccurred ? i18next.t("engine.errorLoading") : i18next.t("engine.error");
-        this.labelMenus.color = "#E74C3C";
-        this.menu.set(this.labelMenus, this.btnQuit);
-        
-        this.btnQuit.setClickAction(() => {
-          this.confirmExit = false;
-          this.exit();
-        });
-      } else if(this.getInfosControls) {
-        this.menu.set(this.labelMenus, this.btnOK);
-
-        this.labelMenus.text = this.labelAdvice.text;
-
-        this.btnOK.setClickAction(() => {
-          this.getInfosControls = false;
-        });
-      }  else if(this.getInfosGoal) {
-        this.menu.set(this.labelMenus, this.btnOK);
-
-        this.labelMenus.text = this.goalMessage;
-
-        this.btnOK.setClickAction(() => {
-          this.getInfosGoal = false;
-        });
-      } else if(this.getInfosGame) {
-        if(this.getAdvancedInfosGame && (this.grid && (this.grid.seedGrid || this.grid.seedGame))) {
-          this.labelMenus.text = (this.grid.seedGrid ? i18next.t("engine.seedGrid") + "\n" + this.grid.seedGrid : "") + (this.grid.seedGame ? "\n" + i18next.t("engine.seedGame") + "\n" + this.grid.seedGame : "");
-          this.menu.set(this.labelMenus, this.btnOK);
-          
-          this.btnOK.setClickAction(() => {
-            this.getAdvancedInfosGame = false;
-          });
-        } else {
-          this.labelMenus.text = (this.snakes != null && this.snakes.length <= 1 && !this.spectatorMode ? i18next.t("engine.player") + " " + (((this.snakes != null && this.snakes[0].player == GameConstants.PlayerType.HUMAN && !this.spectatorMode) || (this.snakes != null && this.snakes[0].player == GameConstants.PlayerType.HYBRID_HUMAN_AI)) ? i18next.t("engine.playerHuman") : i18next.t("engine.playerAI")) : "") + (this.getNBPlayer(GameConstants.PlayerType.AI) > 0 ? "\n" +  i18next.t("engine.aiLevel") + " " + i18next.t("engine.aiLevelList." + this.getPlayer(1, GameConstants.PlayerType.AI).getAILevelText()) : "") + "\n" + i18next.t("engine.sizeGrid") + " " + (this.grid != null && this.grid.width ? this.grid.width : "???") + "×" + (this.grid != null && this.grid.height ? this.grid.height : "???") + "\n" + i18next.t("engine.currentSpeed") + " " + (this.initialSpeed != null ? this.initialSpeed : "???") + (this.snakes != null && this.snakes.length <= 1 && this.progressiveSpeed ? "\n" + i18next.t("engine.progressiveSpeed") : "") + (this.grid != null && !this.grid.maze && this.snakes != null && this.snakes[0].player == GameConstants.PlayerType.HYBRID_HUMAN_AI ? "\n" + i18next.t("engine.assistAI") : "") + (this.grid != null && this.grid.maze ? "\n" + i18next.t("engine.mazeModeMin") : "") + (this.onlineMode ? "\n" + i18next.t("engine.onlineMode") : "") + (this.pingLatency > -1 ? "\n" + i18next.t("engine.ping") + " " + this.pingLatency + " ms" : "");
-
-          if(this.grid && (this.grid.seedGrid || this.grid.seedGame)) {
-            if(this.goalMessage) {
-              this.menu.set(this.labelMenus, this.btnGoal, this.btnAdvanced, this.btnOK);
-            } else {
-              this.menu.set(this.labelMenus, this.btnAdvanced, this.btnOK);
-            }
-          } else {
-            if(this.goalMessage) {
-              this.menu.set(this.labelMenus, this.btnGoal, this.btnOK);
-            } else {
-              this.menu.set(this.labelMenus, this.btnOK);
-            }
-          }
-          
-          this.btnOK.setClickAction(() => {
-            this.getInfosGame = false;
-          });
-          
-          this.btnGoal.setClickAction(() => {
-            this.getInfosGoal = true;
-          });
-    
-          this.btnAdvanced.setClickAction(() => {
-            this.getAdvancedInfosGame = true;
-          });
+        // Update play/pause button label
+        if(this.replayController.replayPlayer) {
+          this.btnReplayPlayPause.text = this.replayController.replayPlayer.isPlaying ? "Pause" : "Play";
+          this.btnReplaySpeed.text = this.replayController.replayPlayer.speed + "x";
         }
+
+        // Draw replay info overlay at top
+        this.replayController.drawReplayOverlay(
+          ctx, this.canvas, this.snakes, this.ticks,
+          this.gameOver, this.gameFinished, this.aiStuck, this.fontSize
+        );
+
+        // Draw replay control bar at bottom
+        this.replayController.drawReplayControls(ctx, this.canvas, {
+          btnReplayPlayPause: this.btnReplayPlayPause,
+          btnReplayPrev: this.btnReplayPrev,
+          btnReplayNext: this.btnReplayNext,
+          btnReplaySpeed: this.btnReplaySpeed,
+          btnReplayExit: this.btnReplayExit,
+          btnReplayExport: this.btnReplayExport,
+          btnReplayImport: this.btnReplayImport,
+          replayProgressBar: this.replayProgressBar
+        }, this.fontSize);
+      } else {
+      // --- Normal game mode: state-specific menus and UI -------------------
+
+        if(this.searchingPlayers && this.lastTime > 0) {
+          this.timeStart -= Math.max(0, Date.now() - this.lastTime);
+        } else {
+          this.timeStart = 0;
+        }
+
+        const nextGameText = (this.timeStart > 0 ? ("\n\n" + i18next.t("engine.servers.nextGameStart") + " " + GameUtils.millisecondsFormat(this.timeStart)) : "");
+
+        if(this.exited) {
+          this.labelMenus.text = i18next.t("engine.exited");
+          this.labelMenus.color = "white";
+          this.fullscreen ? this.menu.set(this.labelMenus, this.btnExitFullScreen) : this.menu.set(this.labelMenus);
         
-        this.labelMenus.color = "white";
-      } else if(this.getInfos) {
-        this.labelMenus.text = i18next.t("engine.aboutScreen.title") + "\nwww.eliastiksofts.com\n\n" + i18next.t("engine.aboutScreen.versionAndDate", { version: GameConstants.Setting.APP_VERSION, date: new Intl.DateTimeFormat(i18next.language).format(new Date(GameConstants.Setting.DATE_VERSION)), interpolation: { escapeValue: false } });
-        this.labelMenus.color = "white";
+          this.btnExitFullScreen.setClickAction(() => {
+            this.toggleFullscreen();
+          });
+        } else if(this.errorOccurred || this.loadingResourcesErrorOccurred) {
+          this.labelMenus.text = this.loadingResourcesErrorOccurred ? i18next.t("engine.errorLoading") : i18next.t("engine.error");
+          this.labelMenus.color = "#E74C3C";
+          this.menu.set(this.labelMenus, this.btnQuit);
         
-        this.menu.set(this.labelMenus, this.btnControls, this.btnOK);
+          this.btnQuit.setClickAction(() => {
+            this.confirmExit = false;
+            this.exit();
+          });
+        } else if(this.getInfosControls) {
+          this.menu.set(this.labelMenus, this.btnOK);
+
+          this.labelMenus.text = this.labelAdvice.text;
+
+          this.btnOK.setClickAction(() => {
+            this.getInfosControls = false;
+          });
+        }  else if(this.getInfosGoal) {
+          this.menu.set(this.labelMenus, this.btnOK);
+
+          this.labelMenus.text = this.goalMessage;
+
+          this.btnOK.setClickAction(() => {
+            this.getInfosGoal = false;
+          });
+        } else if(this.getInfosGame) {
+          if(this.getAdvancedInfosGame && (this.grid && (this.grid.seedGrid || this.grid.seedGame))) {
+            this.labelMenus.text = (this.grid.seedGrid ? i18next.t("engine.seedGrid") + "\n" + this.grid.seedGrid : "") + (this.grid.seedGame ? "\n" + i18next.t("engine.seedGame") + "\n" + this.grid.seedGame : "");
+            this.menu.set(this.labelMenus, this.btnOK);
           
-        this.btnControls.setClickAction(() => {
-          this.getInfosControls = true;
-        });
-
-        this.btnOK.setClickAction(() => {
-          this.getInfos = false;
-        });
-      } else if(this.confirmExit) {
-        this.labelMenus.text = i18next.t("engine.exitConfirm");
-        this.labelMenus.color = "#E74C3C";
-        this.menu.set(this.labelMenus, this.btnNo, this.btnYes);
-        
-        this.btnYes.setClickAction(() => {
-          this.confirmExit = false;
-          this.exit();
-        });
-        
-        this.btnNo.setClickAction(() => {
-          this.confirmExit = false;
-        });
-      } else if(this.assetsLoaded && !this.engineLoading && this.countBeforePlay >= 0) {
-        const { playerHuman, colorName, colorRgb } = this.getCurrentPlayerInfos();
-
-        if(this.snakes != null && ((this.snakes.length > 1 && this.getNBPlayer(GameConstants.PlayerType.HUMAN) <= 1 && this.getPlayer(1, GameConstants.PlayerType.HUMAN) != null) || (this.snakes.length > 1 && this.getNBPlayer(GameConstants.PlayerType.HYBRID_HUMAN_AI) <= 1 && this.getPlayer(1, GameConstants.PlayerType.HYBRID_HUMAN_AI) != null) || (this.currentPlayer != null && this.snakes.length > 1))) {
-          if(this.countBeforePlay > 0) {
-            this.labelMenus.text = "" + this.countBeforePlay;
+            this.btnOK.setClickAction(() => {
+              this.getAdvancedInfosGame = false;
+            });
           } else {
-            this.labelMenus.text = i18next.t("engine.ready");
+            this.labelMenus.text = (this.snakes != null && this.snakes.length <= 1 && !this.spectatorMode ? i18next.t("engine.player") + " " + (((this.snakes != null && this.snakes[0].player == GameConstants.PlayerType.HUMAN && !this.spectatorMode) || (this.snakes != null && this.snakes[0].player == GameConstants.PlayerType.HYBRID_HUMAN_AI)) ? i18next.t("engine.playerHuman") : i18next.t("engine.playerAI")) : "") + (this.getNBPlayer(GameConstants.PlayerType.AI) > 0 ? "\n" +  i18next.t("engine.aiLevel") + " " + i18next.t("engine.aiLevelList." + this.getPlayer(1, GameConstants.PlayerType.AI).getAILevelText()) : "") + "\n" + i18next.t("engine.sizeGrid") + " " + (this.grid != null && this.grid.width ? this.grid.width : "???") + "×" + (this.grid != null && this.grid.height ? this.grid.height : "???") + "\n" + i18next.t("engine.currentSpeed") + " " + (this.initialSpeed != null ? this.initialSpeed : "???") + (this.snakes != null && this.snakes.length <= 1 && this.progressiveSpeed ? "\n" + i18next.t("engine.progressiveSpeed") : "") + (this.grid != null && !this.grid.maze && this.snakes != null && this.snakes[0].player == GameConstants.PlayerType.HYBRID_HUMAN_AI ? "\n" + i18next.t("engine.assistAI") : "") + (this.grid != null && this.grid.maze ? "\n" + i18next.t("engine.mazeModeMin") : "") + (this.onlineMode ? "\n" + i18next.t("engine.onlineMode") : "") + (this.pingLatency > -1 ? "\n" + i18next.t("engine.ping") + " " + this.pingLatency + " ms" : "");
+
+            if(this.grid && (this.grid.seedGrid || this.grid.seedGame)) {
+              if(this.goalMessage) {
+                this.menu.set(this.labelMenus, this.btnGoal, this.btnAdvanced, this.btnOK);
+              } else {
+                this.menu.set(this.labelMenus, this.btnAdvanced, this.btnOK);
+              }
+            } else {
+              if(this.goalMessage) {
+                this.menu.set(this.labelMenus, this.btnGoal, this.btnOK);
+              } else {
+                this.menu.set(this.labelMenus, this.btnOK);
+              }
+            }
+          
+            this.btnOK.setClickAction(() => {
+              this.getInfosGame = false;
+            });
+          
+            this.btnGoal.setClickAction(() => {
+              this.getInfosGoal = true;
+            });
+    
+            this.btnAdvanced.setClickAction(() => {
+              this.getAdvancedInfosGame = true;
+            });
           }
+        
+          this.labelMenus.color = "white";
+        } else if(this.getInfos) {
+          this.labelMenus.text = i18next.t("engine.aboutScreen.title") + "\nwww.eliastiksofts.com\n\n" + i18next.t("engine.aboutScreen.versionAndDate", { version: GameConstants.Setting.APP_VERSION, date: new Intl.DateTimeFormat(i18next.language).format(new Date(GameConstants.Setting.DATE_VERSION)), interpolation: { escapeValue: false } });
+          this.labelMenus.color = "white";
+        
+          this.menu.set(this.labelMenus, this.btnControls, this.btnOK);
+          
+          this.btnControls.setClickAction(() => {
+            this.getInfosControls = true;
+          });
 
-          this.labelMenus.text += (playerHuman != null ? ("\n" + (this.isFilterHueAvailable && colorName != "???" && (this.graphicSkin == "flat" || this.graphicSkin == "pixel") ? i18next.t("engine.colorPlayer", { color: colorName }) : i18next.t("engine.arrowPlayer"))) : "");
+          this.btnOK.setClickAction(() => {
+            this.getInfos = false;
+          });
+        } else if(this.confirmExit) {
+          this.labelMenus.text = i18next.t("engine.exitConfirm");
+          this.labelMenus.color = "#E74C3C";
+          this.menu.set(this.labelMenus, this.btnNo, this.btnYes);
+        
+          this.btnYes.setClickAction(() => {
+            this.confirmExit = false;
+            this.exit();
+          });
+        
+          this.btnNo.setClickAction(() => {
+            this.confirmExit = false;
+          });
+        } else if(this.assetsLoaded && !this.engineLoading && this.countBeforePlay >= 0) {
+          const { playerHuman, colorName, colorRgb } = this.getCurrentPlayerInfos();
 
-          if(colorRgb && colorRgb.length >= 3) {
-            this.labelMenus.color = (this.isFilterHueAvailable && colorName != "???" && (this.graphicSkin == "flat" || this.graphicSkin == "pixel") ? ["white", "rgb(" + colorRgb[0] + ", " + colorRgb[1] + ", " + colorRgb[2] + ")"] : ["white", "#3498db"]);
+          if(this.snakes != null && ((this.snakes.length > 1 && this.getNBPlayer(GameConstants.PlayerType.HUMAN) <= 1 && this.getPlayer(1, GameConstants.PlayerType.HUMAN) != null) || (this.snakes.length > 1 && this.getNBPlayer(GameConstants.PlayerType.HYBRID_HUMAN_AI) <= 1 && this.getPlayer(1, GameConstants.PlayerType.HYBRID_HUMAN_AI) != null) || (this.currentPlayer != null && this.snakes.length > 1))) {
+            if(this.countBeforePlay > 0) {
+              this.labelMenus.text = "" + this.countBeforePlay;
+            } else {
+              this.labelMenus.text = i18next.t("engine.ready");
+            }
+
+            this.labelMenus.text += (playerHuman != null ? ("\n" + (this.isFilterHueAvailable && colorName != "???" && (this.graphicSkin == "flat" || this.graphicSkin == "pixel") ? i18next.t("engine.colorPlayer", { color: colorName }) : i18next.t("engine.arrowPlayer"))) : "");
+
+            if(colorRgb && colorRgb.length >= 3) {
+              this.labelMenus.color = (this.isFilterHueAvailable && colorName != "???" && (this.graphicSkin == "flat" || this.graphicSkin == "pixel") ? ["white", "rgb(" + colorRgb[0] + ", " + colorRgb[1] + ", " + colorRgb[2] + ")"] : ["white", "#3498db"]);
+            } else {
+              this.labelMenus.color = "white";
+            }
           } else {
+            if(this.countBeforePlay > 0) {
+              this.labelMenus.text = "" + this.countBeforePlay;
+            } else {
+              this.labelMenus.text = i18next.t("engine.ready");
+            }
+
             this.labelMenus.color = "white";
           }
-        } else {
-          if(this.countBeforePlay > 0) {
-            this.labelMenus.text = "" + this.countBeforePlay;
+
+          if(this.fullscreen && playerHuman && !this.spectatorMode) {
+            this.menu.set(this.labelMenus, this.btnExitFullScreen, this.labelAdvice);
+          } else if(!this.fullscreen && playerHuman && !this.spectatorMode) {
+            this.menu.set(this.labelMenus, this.btnEnterFullScreen, this.labelAdvice);
+          } else if(this.fullscreen && !(playerHuman && !this.spectatorMode)) {
+            this.menu.set(this.labelMenus, this.btnExitFullScreen);
+          } else if(!this.fullscreen && !(playerHuman && !this.spectatorMode)) {
+            this.menu.set(this.labelMenus, this.btnEnterFullScreen);
+          }
+          
+          this.btnEnterFullScreen.setClickAction(() => {
+            this.toggleFullscreen();
+          });
+          
+          this.btnExitFullScreen.setClickAction(() => {
+            this.toggleFullscreen();
+          });
+        } else if(this.confirmReset && !this.gameOver) {
+          this.labelMenus.text = i18next.t("engine.resetConfirm");
+          this.labelMenus.color = "#E74C3C";
+          this.menu.set(this.labelMenus, this.btnNo, this.btnYes);
+        
+          this.btnYes.setClickAction(() => {
+            this.confirmReset = false;
+            this.reset();
+          });
+
+          this.btnNo.setClickAction(() => {
+            this.confirmReset = false;
+          });
+        } else if(this.gameFinished) {
+          this.labelMenus.text = (this.grid.maze && this.gameMazeWin) ? i18next.t("engine.mazeWin") : i18next.t("engine.gameFinished") + nextGameText;
+          this.labelMenus.color = (this.grid.maze && this.gameMazeWin) ? "#2ecc71" : "white";
+
+          // Add Watch Replay button if a recording is available
+          if(this.controller && this.controller.getReplayData()) {
+            this.enableRetry
+              ? this.menu.set(this.labelMenus, this.btnWatchReplay, this.btnRetry, this.btnQuit)
+              : this.menu.set(this.labelMenus, this.btnWatchReplay, this.btnQuit);
           } else {
-            this.labelMenus.text = i18next.t("engine.ready");
+            this.enableRetry
+              ? this.menu.set(this.labelMenus, this.btnRetry, this.btnQuit)
+              : this.menu.set(this.labelMenus, this.btnQuit);
           }
 
-          this.labelMenus.color = "white";
-        }
+          this.btnWatchReplay.setClickAction(() => {
+            const data = this.controller.getReplayData();
+            if(data) this.controller.startReplay(data);
+          });
 
-        if(this.fullscreen && playerHuman && !this.spectatorMode) {
-          this.menu.set(this.labelMenus, this.btnExitFullScreen, this.labelAdvice);
-        } else if(!this.fullscreen && playerHuman && !this.spectatorMode) {
-          this.menu.set(this.labelMenus, this.btnEnterFullScreen, this.labelAdvice);
-        } else if(this.fullscreen && !(playerHuman && !this.spectatorMode)) {
-          this.menu.set(this.labelMenus, this.btnExitFullScreen);
-        } else if(!this.fullscreen && !(playerHuman && !this.spectatorMode)) {
-          this.menu.set(this.labelMenus, this.btnEnterFullScreen);
-        }
-          
-        this.btnEnterFullScreen.setClickAction(() => {
-          this.toggleFullscreen();
-        });
-          
-        this.btnExitFullScreen.setClickAction(() => {
-          this.toggleFullscreen();
-        });
-      } else if(this.confirmReset && !this.gameOver) {
-        this.labelMenus.text = i18next.t("engine.resetConfirm");
-        this.labelMenus.color = "#E74C3C";
-        this.menu.set(this.labelMenus, this.btnNo, this.btnYes);
-        
-        this.btnYes.setClickAction(() => {
-          this.confirmReset = false;
-          this.reset();
-        });
-
-        this.btnNo.setClickAction(() => {
-          this.confirmReset = false;
-        });
-      } else if(this.gameFinished) {
-        this.labelMenus.text = (this.grid.maze && this.gameMazeWin) ? i18next.t("engine.mazeWin") : i18next.t("engine.gameFinished") + nextGameText;
-        this.labelMenus.color = (this.grid.maze && this.gameMazeWin) ? "#2ecc71" : "white";
-        this.enableRetry ? this.menu.set(this.labelMenus, this.btnRetry, this.btnQuit) : this.menu.set(this.labelMenus, this.btnQuit);
-        
-        this.btnRetry.setClickAction(() => {
-          this.reset();
-        });
-
-        this.btnQuit.setClickAction(() => {
-          this.confirmExit = true;
-        });
-      } else if(this.scoreMax && this.snakes.length <= 1) {
-        this.labelMenus.text = i18next.t("engine.scoreMax") + nextGameText;
-        this.labelMenus.color = "#2ecc71";
-        this.enableRetry ? this.menu.set(this.labelMenus, this.btnRetry, this.btnQuit) : (this.fullscreen ? this.menu.set(this.labelMenus, this.btnExitFullScreen) : this.menu.set(this.labelMenus, this.btnQuit));
-        
-        this.btnRetry.setClickAction(() => {
-          this.reset();
-        });
-
-        this.btnQuit.setClickAction(() => {
-          this.confirmExit = true;
-        });
-
-        this.btnExitFullScreen.setClickAction(() => {
-          this.toggleFullscreen();
-        });
-      } else if(this.gameOver && this.snakes.length <= 1) {
-        this.labelMenus.text = i18next.t("engine.gameOver") + nextGameText;
-        this.labelMenus.color = "#E74C3C";
-        this.enableRetry && this.snakes[0] && !this.snakes[0].autoRetry ? this.menu.set(this.labelMenus, this.btnRetry, this.btnQuit) : (this.fullscreen ? this.menu.set(this.labelMenus, this.btnExitFullScreen) : this.menu.set(this.labelMenus, this.btnQuit));
-
-        if(this.snakes[0] && this.snakes[0].autoRetry && this.timeoutAutoRetry == null) {
-          this.timeoutAutoRetry = setTimeout(() => {
+          this.btnRetry.setClickAction(() => {
             this.reset();
-          }, 500);
-        } else {
+          });
+
+          this.btnQuit.setClickAction(() => {
+            this.confirmExit = true;
+          });
+        } else if(this.scoreMax && this.snakes.length <= 1) {
+          this.labelMenus.text = i18next.t("engine.scoreMax") + nextGameText;
+          this.labelMenus.color = "#2ecc71";
+
+          // Add Watch Replay button if a recording is available
+          if(this.controller && this.controller.getReplayData()) {
+            this.enableRetry
+              ? this.menu.set(this.labelMenus, this.btnWatchReplay, this.btnRetry, this.btnQuit)
+              : this.menu.set(this.labelMenus, this.btnWatchReplay, this.btnQuit);
+          } else {
+            this.enableRetry
+              ? this.menu.set(this.labelMenus, this.btnRetry, this.btnQuit)
+              : (this.fullscreen ? this.menu.set(this.labelMenus, this.btnExitFullScreen) : this.menu.set(this.labelMenus, this.btnQuit));
+          }
+
+          this.btnWatchReplay.setClickAction(() => {
+            const data = this.controller.getReplayData();
+            if(data) this.controller.startReplay(data);
+          });
+
           this.btnRetry.setClickAction(() => {
             this.reset();
           });
@@ -1127,76 +1264,116 @@ export default class GameUI {
           this.btnExitFullScreen.setClickAction(() => {
             this.toggleFullscreen();
           });
-        }
-      } else if(this.assetsLoaded && !this.engineLoading && this.searchingPlayers) {
-        this.labelMenus.text = i18next.t("engine.servers.waitingPlayers") + "\n" + this.playerNumber + "/" + this.maxPlayers + (this.timeStart > 0 ? ("\n\n" + i18next.t("engine.servers.gameStart") + " " + GameUtils.millisecondsFormat(this.timeStart)) : "");
-        this.labelMenus.color = "white";
-        this.onlineMaster ? this.menu.set(this.labelMenus, this.btnStartGame, this.btnQuit) : this.menu.set(this.labelMenus, this.btnQuit);
+        } else if(this.gameOver && this.snakes.length <= 1) {
+          this.labelMenus.text = i18next.t("engine.gameOver") + nextGameText;
+          this.labelMenus.color = "#E74C3C";
+
+          // Add Watch Replay button if a recording is available
+          if(this.controller && this.controller.getReplayData()) {
+            if(this.enableRetry && this.snakes[0] && !this.snakes[0].autoRetry) {
+              this.menu.set(this.labelMenus, this.btnWatchReplay, this.btnRetry, this.btnQuit);
+            } else {
+              this.menu.set(this.labelMenus, this.btnWatchReplay, this.btnQuit);
+            }
+          } else {
+            this.enableRetry && this.snakes[0] && !this.snakes[0].autoRetry
+              ? this.menu.set(this.labelMenus, this.btnRetry, this.btnQuit)
+              : (this.fullscreen ? this.menu.set(this.labelMenus, this.btnExitFullScreen) : this.menu.set(this.labelMenus, this.btnQuit));
+          }
+
+          this.btnWatchReplay.setClickAction(() => {
+            const data = this.controller.getReplayData();
+            if(data) this.controller.startReplay(data);
+          });
+
+          if(this.snakes[0] && this.snakes[0].autoRetry && this.timeoutAutoRetry == null) {
+            this.timeoutAutoRetry = setTimeout(() => {
+              this.reset();
+            }, 500);
+          } else {
+            this.btnRetry.setClickAction(() => {
+              this.reset();
+            });
+
+            this.btnQuit.setClickAction(() => {
+              this.confirmExit = true;
+            });
+
+            this.btnExitFullScreen.setClickAction(() => {
+              this.toggleFullscreen();
+            });
+          }
+        } else if(this.assetsLoaded && !this.engineLoading && this.searchingPlayers) {
+          this.labelMenus.text = i18next.t("engine.servers.waitingPlayers") + "\n" + this.playerNumber + "/" + this.maxPlayers + (this.timeStart > 0 ? ("\n\n" + i18next.t("engine.servers.gameStart") + " " + GameUtils.millisecondsFormat(this.timeStart)) : "");
+          this.labelMenus.color = "white";
+          this.onlineMaster ? this.menu.set(this.labelMenus, this.btnStartGame, this.btnQuit) : this.menu.set(this.labelMenus, this.btnQuit);
         
-        this.btnQuit.setClickAction(() => {
-          this.confirmExit = true;
-        });
+          this.btnQuit.setClickAction(() => {
+            this.confirmExit = true;
+          });
 
-        this.btnStartGame.setClickAction(() => {
-          this.forceStart();
-        });
-      } else if(this.paused && !this.gameOver && this.assetsLoaded && !this.engineLoading) {
-        this.labelMenus.text = i18next.t("engine.pause");
-        this.labelMenus.color = "white";
-        this.enablePause ? (this.enableRetry && this.enableRetryPauseMenu ?
-          this.menu.set(this.labelMenus, this.btnContinue, this.btnRetry, this.btnAbout, this.btnInfosGame, this.btnQuit) :
-          this.menu.set(this.labelMenus, this.btnContinue, this.btnAbout, this.btnInfosGame, this.btnQuit)) :
-          (this.menu.set(this.labelMenus, this.btnContinue, this.btnInfosGame, this.btnAbout));
+          this.btnStartGame.setClickAction(() => {
+            this.forceStart();
+          });
+        } else if(this.paused && !this.gameOver && this.assetsLoaded && !this.engineLoading) {
+          this.labelMenus.text = i18next.t("engine.pause");
+          this.labelMenus.color = "white";
+          this.enablePause ? (this.enableRetry && this.enableRetryPauseMenu ?
+            this.menu.set(this.labelMenus, this.btnContinue, this.btnRetry, this.btnAbout, this.btnInfosGame, this.btnQuit) :
+            this.menu.set(this.labelMenus, this.btnContinue, this.btnAbout, this.btnInfosGame, this.btnQuit)) :
+            (this.menu.set(this.labelMenus, this.btnContinue, this.btnInfosGame, this.btnAbout));
         
-        this.btnContinue.setClickAction(() => {
-          this.start();
-        });
+          this.btnContinue.setClickAction(() => {
+            this.start();
+          });
 
-        this.btnRetry.setClickAction(() => {
-          this.confirmReset = true;
-        });
+          this.btnRetry.setClickAction(() => {
+            this.confirmReset = true;
+          });
         
-        this.btnInfosGame.setClickAction(() => {
-          this.getInfosGame = true;
-        });
+          this.btnInfosGame.setClickAction(() => {
+            this.getInfosGame = true;
+          });
 
-        this.btnQuit.setClickAction(() => {
-          this.confirmExit = true;
-        });
+          this.btnQuit.setClickAction(() => {
+            this.confirmExit = true;
+          });
 
-        this.btnAbout.setClickAction(() => {
-          this.getInfos = true;
-        });
-      } else if(this.assetsLoaded && !this.engineLoading) {
-        this.btnFullScreen.enable();
-        this.gameRanking.enable();
+          this.btnAbout.setClickAction(() => {
+            this.getInfos = true;
+          });
+        } else if(this.assetsLoaded && !this.engineLoading) {
+          this.btnFullScreen.enable();
+          this.gameRanking.enable();
 
-        if(this.snakes != null) {
-          for(let i = 0; i < this.snakes.length; i++) {
-            if(this.snakes[i].player == GameConstants.PlayerType.HUMAN || this.snakes[i].player == GameConstants.PlayerType.HYBRID_HUMAN_AI) {
-              this.btnTopArrow.enable();
-              this.btnBottomArrow.enable();
-              this.btnLeftArrow.enable();
-              this.btnRightArrow.enable();
-              break;
+          if(this.snakes != null) {
+            for(let i = 0; i < this.snakes.length; i++) {
+              if(this.snakes[i].player == GameConstants.PlayerType.HUMAN || this.snakes[i].player == GameConstants.PlayerType.HYBRID_HUMAN_AI) {
+                this.btnTopArrow.enable();
+                this.btnBottomArrow.enable();
+                this.btnLeftArrow.enable();
+                this.btnRightArrow.enable();
+                break;
+              }
             }
           }
+
+          if(this.enablePause) {
+            this.btnPause.enable();
+          }
+
+          if(this.snakes != null && this.snakes.length > 1) {
+            this.btnRank.enable();
+          }
+
+          if(this.notificationMessage != undefined && this.notificationMessage != null && this.notificationMessage instanceof NotificationMessage && !this.notificationMessage.foreGround) {
+            this.notificationMessage.enableCloseButton();
+          }
+
+          this.timeoutAutoRetry = null;
         }
 
-        if(this.enablePause) {
-          this.btnPause.enable();
-        }
-
-        if(this.snakes != null && this.snakes.length > 1) {
-          this.btnRank.enable();
-        }
-
-        if(this.notificationMessage != undefined && this.notificationMessage != null && this.notificationMessage instanceof NotificationMessage && !this.notificationMessage.foreGround) {
-          this.notificationMessage.enableCloseButton();
-        }
-
-        this.timeoutAutoRetry = null;
-      }
+      } // end of else (normal game mode)
 
       this.labelMenus.fontSize = this.fontSize;
       this.menu.draw(this.canvasCtx);
@@ -1259,6 +1436,26 @@ export default class GameUI {
     }
   }
 
+  /**
+   * Exit replay mode and cleanly restore the normal game flow.
+   * Called when the user clicks "Exit" in replay mode, or when
+   * retry/exit is requested while a replay is active.
+   */
+  stopReplayMode() {
+    if(this.replayMode && this.replayController) {
+      this.replayController.stopReplay();
+    }
+    // Disable replay buttons
+    if(this.btnReplayPlayPause) this.btnReplayPlayPause.disable();
+    if(this.btnReplayPrev) this.btnReplayPrev.disable();
+    if(this.btnReplayNext) this.btnReplayNext.disable();
+    if(this.btnReplaySpeed) this.btnReplaySpeed.disable();
+    if(this.btnReplayExit) this.btnReplayExit.disable();
+    if(this.btnReplayExport) this.btnReplayExport.disable();
+    if(this.btnReplayImport) this.btnReplayImport.disable();
+    if(this.replayProgressBar) this.replayProgressBar.disable();
+  }
+
   setDisplayFPS(display) {
     console.warn("setDisplayFPS is deprecated. Please use setDebugMode with true to display FPS");
     this.setDebugMode(display);
@@ -1285,6 +1482,15 @@ export default class GameUI {
       this.btnExitFullScreen.disable();
       this.btnEnterFullScreen.disable();
       this.btnStartGame.disable();
+      // Replay buttons
+      if(this.btnReplayPlayPause) this.btnReplayPlayPause.disable();
+      if(this.btnReplayPrev) this.btnReplayPrev.disable();
+      if(this.btnReplayNext) this.btnReplayNext.disable();
+      if(this.btnReplaySpeed) this.btnReplaySpeed.disable();
+      if(this.btnReplayExit) this.btnReplayExit.disable();
+      if(this.btnReplayExport) this.btnReplayExport.disable();
+      if(this.btnReplayImport) this.btnReplayImport.disable();
+      if(this.replayProgressBar) this.replayProgressBar.disable();
       this.gameRanking.disable();
 
       if(this.notificationMessage != undefined && this.notificationMessage != null && this.notificationMessage instanceof NotificationMessage) {

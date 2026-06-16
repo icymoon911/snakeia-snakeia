@@ -18,11 +18,14 @@
  */
 import GameConstants from "./Constants.js";
 import Reactor from "./Reactor.js";
+import ReplayRecorder from "./ReplayRecorder.js";
 
 export default class GameController {
   constructor(engine, ui) {
     this.gameUI = ui;
     this.gameEngine = engine;
+    // Replay recorder - captures game frames for later playback
+    this.gameRecorder = null;
     // Copy of game engine variables
     this.grid = null;
     this.snakes = null;
@@ -120,6 +123,17 @@ export default class GameController {
         "errorOccurred": this.gameEngine.errorOccurred,
         "engineLoading": this.gameEngine.engineLoading
       });
+
+      // Start (or restart) the replay recorder when a new game begins
+      if (!this.gameRecorder) {
+        this.gameRecorder = new ReplayRecorder(this.gameEngine);
+      } else {
+        // Reset for a new game session
+        this.gameRecorder.stop();
+        this.gameRecorder = new ReplayRecorder(this.gameEngine);
+      }
+      this.gameRecorder.start();
+
       this.reactor.dispatchEvent("onStart");
     });
 
@@ -153,6 +167,11 @@ export default class GameController {
     });
 
     this.gameEngine.onStop(() => {
+      // Make sure the recorder captures the final state
+      if (this.gameRecorder && this.gameRecorder.isRecording) {
+        this.gameRecorder.stop();
+      }
+
       this.update("stop", {
         "paused": this.gameEngine.paused,
         "scoreMax": this.gameEngine.scoreMax,
@@ -478,5 +497,41 @@ export default class GameController {
 
   onScoreIncreased(callback) {
     this.reactor.addEventListener("onScoreIncreased", callback);
+  }
+
+  // --- Replay methods ------------------------------------------------------
+
+  /** Returns the recorded replay data, or null if nothing was recorded. */
+  getReplayData() {
+    if (this.gameRecorder && this.gameRecorder.frameCount > 0) {
+      return this.gameRecorder.export();
+    }
+    return null;
+  }
+
+  /**
+   * Enter replay mode with the given replay data.
+   * If the user is currently in a game, the game state is saved first.
+   */
+  startReplay(replayData) {
+    if (this.gameUI && this.gameUI.replayController) {
+      // If a game is in progress, pause it first
+      if (!this.gameEngine.paused && !this.gameEngine.gameOver && !this.gameEngine.gameFinished) {
+        this.gameEngine.pause();
+      }
+      this.gameUI.replayController.startReplay(replayData);
+    }
+  }
+
+  /** Exit replay mode and restore the previous game state. */
+  stopReplay() {
+    if (this.gameUI && this.gameUI.replayController) {
+      this.gameUI.replayController.stopReplay();
+    }
+  }
+
+  /** True while a replay is being played back. */
+  isReplaying() {
+    return this.gameUI && this.gameUI.replayMode;
   }
 }
