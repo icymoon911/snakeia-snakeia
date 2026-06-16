@@ -43,6 +43,24 @@ const KEY_TO_EVENT = {
   "updateCounter": "onUpdateCounter"
 };
 
+// Whitelist of property names that may be synchronised from the engine (or
+// server) to the UI and to the controller instance.  Any key that is NOT in
+// this set triggers a console.warn so that typos are caught early instead of
+// silently failing.
+const SYNCED_PROPERTIES = new Set([
+  // Engine game-state properties
+  "paused", "isReseted", "exited", "grid", "numFruit", "ticks",
+  "scoreMax", "gameOver", "gameFinished", "gameMazeWin", "starting",
+  "initialSpeed", "speed", "snakes", "aiStuck", "precAiStuck",
+  "countBeforePlay", "offsetFrame", "enablePause", "enableRetry",
+  "progressiveSpeed", "errorOccurred", "engineLoading", "killed",
+  // Confirmation / menu flags (cleared on every forward)
+  "confirmReset", "confirmExit",
+  "getInfos", "getInfosGame", "getInfosControls", "getInfosGoal",
+  // Controller-specific properties that may be pushed by server data
+  "lastKey", "clientSidePredictionsMode", "currentPlayer", "onlineMode",
+]);
+
 export default class GameController {
   constructor(engine, ui) {
     this.gameUI = ui;
@@ -64,9 +82,9 @@ export default class GameController {
     this.currentPlayer = null;
     this.onlineMode = false;
 
-    // Events
+    // Events — register all events and auto-generate onXxx helpers
     this.reactor = new Reactor();
-    ENGINE_EVENTS.forEach(name => this.reactor.registerEvent(name));
+    this.reactor.defineEvents(ENGINE_EVENTS, this);
 
     this.onReset(() => {
       if(this.gameUI) {
@@ -122,17 +140,12 @@ export default class GameController {
   // --- Initialization (overridden by subclasses for Worker/Socket) ---
 
   async init() {
-    this.update("init", {
-      "snakes": this.gameEngine.snakes,
-      "grid": this.gameEngine.grid,
+    this.update("init", this.buildStateSnapshot({
       "enablePause": this.gameEngine.enablePause,
       "enableRetry": this.gameEngine.enableRetry,
-      "paused": this.gameEngine.paused,
       "progressiveSpeed": this.gameEngine.progressiveSpeed,
       "offsetFrame": this.gameEngine.speed * GameConstants.Setting.TIME_MULTIPLIER,
-      "errorOccurred": this.gameEngine.errorOccurred,
-      "engineLoading": this.gameEngine.engineLoading
-    });
+    }));
 
     this._registerEngineEventForwarding();
 
@@ -143,6 +156,45 @@ export default class GameController {
     }
   }
 
+  // --- State snapshot builder ---
+
+  /**
+   * Build a full state snapshot from the engine, with optional overrides.
+   *
+   * The returned object contains every engine property the UI layer normally
+   * needs.  Callers only have to supply the few event-specific fields (if any)
+   * via `overrides`, which are merged on top of the common base.
+   *
+   * @param {object} [overrides={}] - Event-specific properties that replace or
+   *   supplement the common snapshot.
+   * @returns {object} A plain object safe to pass to `update()`.
+   */
+  buildStateSnapshot(overrides = {}) {
+    const e = this.gameEngine;
+    return {
+      "paused": e.paused,
+      "isReseted": e.isReseted,
+      "exited": e.exited,
+      "grid": e.grid,
+      "numFruit": e.numFruit,
+      "ticks": e.ticks,
+      "scoreMax": e.scoreMax,
+      "gameOver": e.gameOver,
+      "gameFinished": e.gameFinished,
+      "gameMazeWin": e.gameMazeWin,
+      "starting": e.starting,
+      "initialSpeed": e.initialSpeed,
+      "speed": e.speed,
+      "snakes": e.snakes,
+      "countBeforePlay": e.countBeforePlay,
+      "aiStuck": e.aiStuck,
+      "errorOccurred": e.errorOccurred,
+      "engineLoading": e.engineLoading,
+      "offsetFrame": e.speed * GameConstants.Setting.TIME_MULTIPLIER,
+      ...overrides,
+    };
+  }
+
   /**
    * Register event forwarding from engine reactor to controller reactor.
    * Used by the direct (non-Worker, non-Socket) controller.
@@ -151,102 +203,68 @@ export default class GameController {
   _registerEngineEventForwarding() {
     const engine = this.gameEngine;
 
-    const forwardUpdate = (key, dataObj) => {
-      this.update(key, {
-        ...dataObj,
-        "confirmReset": false, "confirmExit": false,
-        "getInfos": false, "getInfosGame": false,
-        "getInfosControls": false, "getInfosGoal": false,
-        "errorOccurred": engine.errorOccurred,
-        "engineLoading": engine.engineLoading
-      });
+    // Common base forwarded with every event — menu/info flags are always
+    // cleared so that a stale flag cannot persist across events.
+    const COMMON_FORWARD = {
+      "confirmReset": false, "confirmExit": false,
+      "getInfos": false, "getInfosGame": false,
+      "getInfosControls": false, "getInfosGoal": false,
     };
 
-    engine.onReset(() => {
-      forwardUpdate("reset", {
-        "paused": engine.paused, "isReseted": engine.isReseted, "exited": engine.exited,
-        "grid": engine.grid, "numFruit": engine.numFruit, "ticks": engine.ticks,
-        "scoreMax": engine.scoreMax, "gameOver": engine.gameOver, "gameFinished": engine.gameFinished,
-        "gameMazeWin": engine.gameMazeWin, "starting": engine.starting,
-        "initialSpeed": engine.initialSpeed, "speed": engine.speed,
-        "snakes": engine.snakes, "aiStuck": engine.aiStuck, "precAiStuck": false,
-        "offsetFrame": engine.speed * GameConstants.Setting.TIME_MULTIPLIER
-      });
-      this.reactor.dispatchEvent("onReset");
-    });
+    /**
+     * Sync state and dispatch a reactor event.
+     * @param {string}  key          - Message key (e.g. "reset", "start")
+     * @param {object}  [overrides]  - Event-specific property overrides
+     * @param {boolean} [syncToUI=true] - Whether to call update() (false = event-only)
+     */
+    const forward = (key, overrides, syncToUI = true) => {
+      if(syncToUI) {
+        this.update(key, { ...COMMON_FORWARD, ...this.buildStateSnapshot(overrides) });
+      }
+      this.reactor.dispatchEvent(KEY_TO_EVENT[key]);
+    };
 
-    engine.onStart(() => {
-      forwardUpdate("start", {
-        "snakes": engine.snakes, "grid": engine.grid,
-        "starting": engine.starting, "countBeforePlay": engine.countBeforePlay,
-        "paused": engine.paused, "isReseted": engine.isReseted
-      });
-      this.reactor.dispatchEvent("onStart");
-    });
+    engine.onReset(() => forward("reset", {
+      "precAiStuck": false,
+      "offsetFrame": engine.speed * GameConstants.Setting.TIME_MULTIPLIER,
+    }));
 
-    engine.onPause(() => {
-      forwardUpdate("pause", { "paused": engine.paused });
-      this.reactor.dispatchEvent("onPause");
-    });
+    engine.onStart(() => forward("start", {
+      "starting": engine.starting,
+      "countBeforePlay": engine.countBeforePlay,
+    }));
 
-    engine.onContinue(() => {
-      forwardUpdate("continue", {});
-      this.reactor.dispatchEvent("onContinue");
-    });
+    engine.onPause(() => forward("pause"));
+    engine.onContinue(() => forward("continue"));
 
-    engine.onStop(() => {
-      forwardUpdate("stop", {
-        "paused": engine.paused, "scoreMax": engine.scoreMax,
-        "gameOver": engine.gameOver, "gameFinished": engine.gameFinished
-      });
-      this.reactor.dispatchEvent("onStop");
-    });
+    engine.onStop(() => forward("stop", {
+      "scoreMax": engine.scoreMax,
+      "gameOver": engine.gameOver,
+      "gameFinished": engine.gameFinished,
+    }));
 
-    engine.onExit(() => {
-      forwardUpdate("exit", {
-        "paused": engine.paused, "gameOver": engine.gameOver,
-        "gameFinished": engine.gameFinished, "exited": engine.exited
-      });
-      this.reactor.dispatchEvent("onExit");
-    });
+    engine.onExit(() => forward("exit", {
+      "gameOver": engine.gameOver,
+      "gameFinished": engine.gameFinished,
+      "exited": engine.exited,
+    }));
 
-    engine.onKill(() => {
-      forwardUpdate("kill", {
-        "paused": engine.paused, "gameOver": engine.gameOver,
-        "killed": engine.killed, "snakes": engine.snakes,
-        "gameFinished": engine.gameFinished, "grid": engine.grid
-      });
-      this.reactor.dispatchEvent("onKill");
-    });
+    engine.onKill(() => forward("kill", {
+      "gameOver": engine.gameOver,
+      "killed": engine.killed,
+      "gameFinished": engine.gameFinished,
+    }));
 
+    // ScoreIncreased only fires the reactor event — no state to sync.
     engine.onScoreIncreased(() => {
       this.reactor.dispatchEvent("onScoreIncreased");
     });
 
-    engine.onUpdate(() => {
-      forwardUpdate("update", {
-        "paused": engine.paused, "isReseted": engine.isReseted, "exited": engine.exited,
-        "grid": engine.grid, "numFruit": engine.numFruit, "ticks": engine.ticks,
-        "scoreMax": engine.scoreMax, "gameOver": engine.gameOver, "gameFinished": engine.gameFinished,
-        "gameMazeWin": engine.gameMazeWin, "starting": engine.starting,
-        "initialSpeed": engine.initialSpeed, "speed": engine.speed,
-        "snakes": engine.snakes, "countBeforePlay": engine.countBeforePlay,
-        "offsetFrame": 0, "aiStuck": engine.aiStuck
-      });
-      this.reactor.dispatchEvent("onUpdate");
-    });
+    engine.onUpdate(() => forward("update", {
+      "offsetFrame": 0,
+    }));
 
-    engine.onUpdateCounter(() => {
-      forwardUpdate("updateCounter", {
-        "paused": engine.paused, "isReseted": engine.isReseted, "exited": engine.exited,
-        "grid": engine.grid, "numFruit": engine.numFruit, "ticks": engine.ticks,
-        "scoreMax": engine.scoreMax, "gameOver": engine.gameOver, "gameFinished": engine.gameFinished,
-        "gameMazeWin": engine.gameMazeWin, "starting": engine.starting,
-        "initialSpeed": engine.initialSpeed, "speed": engine.speed,
-        "snakes": engine.snakes, "countBeforePlay": engine.countBeforePlay
-      });
-      this.reactor.dispatchEvent("onUpdateCounter");
-    });
+    engine.onUpdateCounter(() => forward("updateCounter"));
   }
 
   // --- Game control methods ---
@@ -343,50 +361,73 @@ export default class GameController {
 
   // --- State synchronization ---
 
+  /**
+   * Synchronize a data payload to the UI layer and/or the controller itself.
+   *
+   * Every key in `data` is checked against the `SYNCED_PROPERTIES` whitelist.
+   * Unknown keys are still applied (backward compatibility) but a
+   * `console.warn` is emitted so that typos surface during development.
+   *
+   * @param {string}  message       - Event/message key (currently informational)
+   * @param {object}  data          - Key/value pairs to sync
+   * @param {boolean} [updateEngine=false] - Also push values into the engine
+   */
   update(message, data, updateEngine) {
-    if(this.gameUI != null && data != null) {
-      const dataKeys = Object.keys(data);
+    if(this.gameUI == null || data == null) return;
 
-      for(let i = 0; i < dataKeys.length; i++) {
-        if((!this.clientSidePredictionsMode && !this.onlineMode) || (this.clientSidePredictionsMode && (dataKeys[i] == "snakes" || dataKeys[i] == "grid" || dataKeys[i] == "offsetFrame" || dataKeys[i] == "gameOver") && this.onlineMode) || (!this.clientSidePredictionsMode && this.onlineMode)) {
-          if(Object.prototype.hasOwnProperty.call(this.gameUI, dataKeys[i]) && typeof(data[dataKeys[i]]) !== "function" && typeof(this.gameUI[dataKeys[i]]) !== "function") {
-            this.gameUI[dataKeys[i]] = data[dataKeys[i]];
-          }
+    const dataKeys = Object.keys(data);
 
-          if(updateEngine) {
-            if(data.snakes && data.snakes[this.getCurrentPlayer()]) {
-              data.snakes[this.getCurrentPlayer()].lastKey = this.lastKey;
-              this.lastKey = -1;
-            }
+    for(let i = 0; i < dataKeys.length; i++) {
+      const key = dataKeys[i];
+      const value = data[key];
 
-            if(data.grid) {
-              data.grid.rngGame = null;
-              data.grid.rngGrid = null;
-            }
-
-            this.updateEngine(dataKeys[i], data[dataKeys[i]]);
-          }
-
-          if(Object.prototype.hasOwnProperty.call(this, dataKeys[i]) && typeof(data[dataKeys[i]]) !== "function" && typeof(this[dataKeys[i]]) !== "function") {
-            this[dataKeys[i]] = data[dataKeys[i]];
-          }
-        }
+      // Validate against whitelist — warn on unknown keys so typos are caught.
+      if(!SYNCED_PROPERTIES.has(key)) {
+        console.warn(`[GameController.update] Unknown property "${key}" in message "${message}" — not in SYNCED_PROPERTIES whitelist`);
       }
 
-      if(Object.prototype.hasOwnProperty.call(data, "killed") && data.killed && this.gameUI && this.gameUI.setKill) {
-        this.gameUI.setKill();
+      // Skip functions.
+      if(typeof value === "function") continue;
+
+      const shouldSync =
+        (!this.clientSidePredictionsMode && !this.onlineMode) ||
+        (this.clientSidePredictionsMode &&
+          (key === "snakes" || key === "grid" || key === "offsetFrame" || key === "gameOver") &&
+          this.onlineMode) ||
+        (!this.clientSidePredictionsMode && this.onlineMode);
+
+      if(!shouldSync) continue;
+
+      // Sync to UI.
+      if(Object.prototype.hasOwnProperty.call(this.gameUI, key) &&
+         typeof this.gameUI[key] !== "function") {
+        this.gameUI[key] = value;
+      }
+
+      // Optionally push into the engine.
+      if(updateEngine) {
+        if(data.snakes && data.snakes[this.getCurrentPlayer()]) {
+          data.snakes[this.getCurrentPlayer()].lastKey = this.lastKey;
+          this.lastKey = -1;
+        }
+
+        if(data.grid) {
+          data.grid.rngGame = null;
+          data.grid.rngGrid = null;
+        }
+
+        this.updateEngine(key, value);
+      }
+
+      // Sync to controller instance.
+      if(Object.prototype.hasOwnProperty.call(this, key) &&
+         typeof this[key] !== "function") {
+        this[key] = value;
       }
     }
+
+    if(Object.prototype.hasOwnProperty.call(data, "killed") && data.killed && this.gameUI && this.gameUI.setKill) {
+      this.gameUI.setKill();
+    }
   }
-
-  // --- Event convenience methods (backward compatible) ---
-
-  onReset(callback) { this.reactor.addEventListener("onReset", callback); }
-  onStart(callback) { this.reactor.addEventListener("onStart", callback); }
-  onContinue(callback) { this.reactor.addEventListener("onContinue", callback); }
-  onStop(callback) { this.reactor.addEventListener("onStop", callback); }
-  onPause(callback) { this.reactor.addEventListener("onPause", callback); }
-  onExit(callback) { this.reactor.addEventListener("onExit", callback); }
-  onKill(callback) { this.reactor.addEventListener("onKill", callback); }
-  onScoreIncreased(callback) { this.reactor.addEventListener("onScoreIncreased", callback); }
 }

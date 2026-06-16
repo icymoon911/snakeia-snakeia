@@ -83,4 +83,22 @@ export default class Reactor {
     const event = this.events[eventName];
     return event ? event.listenerCount : 0;
   }
+
+  /**
+   * Register multiple events at once and auto-generate onXxx convenience
+   * methods on the given host object.  Each generated method accepts a single
+   * callback and is equivalent to calling `addEventListener("onXxx", callback)`.
+   *
+   * @param {string[]} eventNames - Names of the events to register
+   * @param {object}  host        - Object on which to define the onXxx helpers
+   */
+  defineEvents(eventNames, host) {
+    for(const name of eventNames) {
+      this.registerEvent(name);
+
+      if(host && !(name in host)) {
+        host[name] = (callback) => this.addEventListener(name, callback);
+      }
+    }
+  }
 }

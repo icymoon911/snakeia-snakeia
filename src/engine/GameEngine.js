@@ -73,9 +73,9 @@ export default class GameEngine {
     // Intervals, timeouts, frames
     this.intervalPlay;
 
-    // Events
+    // Events — register all events and auto-generate onXxx helpers
     this.reactor = new Reactor();
-    ENGINE_EVENTS.forEach(name => this.reactor.registerEvent(name));
+    this.reactor.defineEvents(ENGINE_EVENTS, this);
 
     // Extracted modules
     this.movementHandler = new MovementHandler(this);
@@ -337,57 +337,83 @@ export default class GameEngine {
     }
 
     if(this.shouldUpdateEngine()) {
-      let scoreIncreased;
-
       this.ticks++;
+      const scoreIncreased = this.processSnakeMovements();
+      this.checkAndHandleEndGame();
+      this.dispatchTickEvents(scoreIncreased);
+    }
 
-      for(const snake of this.snakes) {
-        const initialDirection = snake.direction;
+    this.tick();
+  }
 
-        snake.lastTailMoved = false;
-        snake.lastHeadMoved = false;
+  /**
+   * Move every alive snake and handle fruit consumption.
+   * @returns {boolean} true if at least one snake's score increased.
+   * @private
+   */
+  processSnakeMovements() {
+    let scoreIncreased = false;
 
-        if(!snake.gameOver && !snake.scoreMax) {
-          const headSnakePos = this.movementHandler.moveSnake(snake, initialDirection);
+    for(const snake of this.snakes) {
+      const initialDirection = snake.direction;
 
-          if(headSnakePos) {
-            if(this.grid.isDeadPosition(headSnakePos)) {
-              snake.setGameOver(this.ticks);
-            } else {
-              const { scoreHasIncreased, setFruits } = this.movementHandler.handleSnakeMoveResult(headSnakePos, snake);
+      snake.lastTailMoved = false;
+      snake.lastHeadMoved = false;
 
-              if(scoreHasIncreased) {
-                scoreIncreased = true;
-              }
+      if(!snake.gameOver && !snake.scoreMax) {
+        const headSnakePos = this.movementHandler.moveSnake(snake, initialDirection);
 
-              if(!this.scoreMax && setFruits && !this.clientSidePredictionsMode) {
-                this.grid.setFruits(this.getNBPlayerAlive());
-              }
+        if(headSnakePos) {
+          if(this.grid.isDeadPosition(headSnakePos)) {
+            snake.setGameOver(this.ticks);
+          } else {
+            const { scoreHasIncreased, setFruits } = this.movementHandler.handleSnakeMoveResult(headSnakePos, snake);
+
+            if(scoreHasIncreased) {
+              scoreIncreased = true;
+            }
+
+            if(!this.scoreMax && setFruits && !this.clientSidePredictionsMode) {
+              this.grid.setFruits(this.getNBPlayerAlive());
             }
           }
         }
       }
-
-      const shouldEndGame = this.checkEndGameCondition();
-
-      if(shouldEndGame) {
-        this.endGame();
-      } else {
-        FruitManager.handleStuckFruits(this.grid, this.getNBPlayerAlive(), this.scoreMax, this.clientSidePredictionsMode);
-
-        if(this.grid.fruitPositions.length === 0 && !this.grid.fruitPosGold) {
-          this.endGame();
-        }
-      }
-
-      this.reactor.dispatchEvent("onUpdate");
-
-      if(scoreIncreased) {
-        this.reactor.dispatchEvent("onScoreIncreased");
-      }
     }
 
-    this.tick();
+    return scoreIncreased;
+  }
+
+  /**
+   * Check end-game conditions, handle stuck fruits, and end the game when the
+   * grid is empty.
+   * @private
+   */
+  checkAndHandleEndGame() {
+    const shouldEndGame = this.checkEndGameCondition();
+
+    if(shouldEndGame) {
+      this.endGame();
+    } else {
+      FruitManager.handleStuckFruits(this.grid, this.getNBPlayerAlive(), this.scoreMax, this.clientSidePredictionsMode);
+
+      if(this.grid.fruitPositions.length === 0 && !this.grid.fruitPosGold) {
+        this.endGame();
+      }
+    }
+  }
+
+  /**
+   * Fire the per-tick reactor events.
+   * @param {boolean} scoreIncreased - Whether any snake scored this tick.
+   * @private
+   */
+  dispatchTickEvents(scoreIncreased) {
+    this.reactor.dispatchEvent("onUpdate");
+
+    if(scoreIncreased) {
+      this.reactor.dispatchEvent("onScoreIncreased");
+    }
   }
 
   // --- End game checks ---
@@ -501,16 +527,4 @@ export default class GameEngine {
     return numPlayer;
   }
 
-  // --- Event convenience methods (backward compatible) ---
-
-  onReset(callback) { this.reactor.addEventListener("onReset", callback); }
-  onStart(callback) { this.reactor.addEventListener("onStart", callback); }
-  onContinue(callback) { this.reactor.addEventListener("onContinue", callback); }
-  onStop(callback) { this.reactor.addEventListener("onStop", callback); }
-  onPause(callback) { this.reactor.addEventListener("onPause", callback); }
-  onExit(callback) { this.reactor.addEventListener("onExit", callback); }
-  onKill(callback) { this.reactor.addEventListener("onKill", callback); }
-  onScoreIncreased(callback) { this.reactor.addEventListener("onScoreIncreased", callback); }
-  onUpdate(callback) { this.reactor.addEventListener("onUpdate", callback); }
-  onUpdateCounter(callback) { this.reactor.addEventListener("onUpdateCounter", callback); }
 }

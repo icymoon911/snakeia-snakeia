@@ -22,14 +22,11 @@ export default class GameGroup {
   constructor(games) {
     this.games = games == undefined ? [] : games;
     this.reactor = new Reactor();
-    this.reactor.registerEvent("onStart");
-    this.reactor.registerEvent("onPause");
-    this.reactor.registerEvent("onContinue");
-    this.reactor.registerEvent("onStop");
-    this.reactor.registerEvent("onReset");
-    this.reactor.registerEvent("onExit");
-    this.reactor.registerEvent("onScoreIncreased");
-    
+    this.reactor.defineEvents([
+      "onStart", "onPause", "onContinue", "onStop",
+      "onReset", "onExit", "onScoreIncreased"
+    ], this);
+
     this.init();
   }
 
@@ -87,10 +84,6 @@ export default class GameGroup {
     this.reactor.dispatchEvent("onStart");
   }
 
-  onStart(callback) {
-    this.reactor.addEventListener("onStart", callback);
-  }
-
   pauseAll(game) {
     for(let i = 0; i < this.games.length; i++) {
       if(!this.games[i].paused && (game == null || i != game)) {
@@ -101,10 +94,6 @@ export default class GameGroup {
     this.reactor.dispatchEvent("onPause");
   }
 
-  onPause(callback) {
-    this.reactor.addEventListener("onPause", callback);
-  }
-
   resetAll(game) {
     for(let i = 0; i < this.games.length; i++) {
       if(!this.games[i].isReseted && (game == null || i != game)) {
@@ -113,10 +102,6 @@ export default class GameGroup {
     }
 
     this.reactor.dispatchEvent("onReset");
-  }
-
-  onReset(callback) {
-    this.reactor.addEventListener("onReset", callback);
   }
 
   checkExit(game) {
@@ -135,10 +120,6 @@ export default class GameGroup {
     }
   }
 
-  onExit(callback) {
-    this.reactor.addEventListener("onExit", callback);
-  }
-
   checkStop() {
     let allStopped = true;
 
@@ -151,10 +132,6 @@ export default class GameGroup {
     if(allStopped) {
       this.reactor.dispatchEvent("onStop");
     }
-  }
-
-  onStop(callback) {
-    this.reactor.addEventListener("onStop", callback);
   }
 
   stopAll(finished) {
@@ -175,10 +152,6 @@ export default class GameGroup {
 
   checkOnScoreIncreased() {
     this.reactor.dispatchEvent("onScoreIncreased");
-  }
-
-  onScoreIncreased(callback) {
-    this.reactor.addEventListener("onScoreIncreased", callback);
   }
 
   setDisplayFPS(value) {
