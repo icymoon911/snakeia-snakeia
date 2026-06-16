@@ -403,37 +403,59 @@ export default class GameController {
   }
 
   update(message, data, updateEngine) {
-    if(this.gameUI != null && data != null) {
-      const dataKeys = Object.keys(data);
+    if (this.gameUI == null || data == null) return;
 
-      for(let i = 0; i < dataKeys.length; i++) {
-        if((!this.clientSidePredictionsMode && !this.onlineMode) || (this.clientSidePredictionsMode && (dataKeys[i] == "snakes" || dataKeys[i] == "grid" || dataKeys[i] == "offsetFrame" || dataKeys[i] == "gameOver") && this.onlineMode) || (!this.clientSidePredictionsMode && this.onlineMode)) {
-          if(Object.prototype.hasOwnProperty.call(this.gameUI, dataKeys[i]) && typeof(data[dataKeys[i]]) !== "function" && typeof(this.gameUI[dataKeys[i]]) !== "function") {
-            this.gameUI[dataKeys[i]] = data[dataKeys[i]];
-          }
+    // ── Filter keys based on client-side prediction mode ────────────────────
+    const allowedKeys = Object.keys(data).filter(key => {
+      if (typeof data[key] === "function") return false;
 
-          if(updateEngine) {
-            if(data.snakes && data.snakes[this.getCurrentPlayer()]) {
-              data.snakes[this.getCurrentPlayer()].lastKey = this.lastKey;
-              this.lastKey = -1;
-            }
+      if (!this.clientSidePredictionsMode && !this.onlineMode) return true;
+      if (this.clientSidePredictionsMode && this.onlineMode) {
+        return key === "snakes" || key === "grid" || key === "offsetFrame" || key === "gameOver";
+      }
+      if (!this.clientSidePredictionsMode && this.onlineMode) return true;
+      return false;
+    });
 
-            if(data.grid) {
-              data.grid.rngGame = null;
-              data.grid.rngGrid = null;
-            }
+    // Build a filtered patch from the allowed keys
+    const patch = {};
+    for (const key of allowedKeys) {
+      patch[key] = data[key];
+    }
 
-            this.updateEngine(dataKeys[i], data[dataKeys[i]]);
-          }
-    
-          if(Object.prototype.hasOwnProperty.call(this, dataKeys[i]) && typeof(data[dataKeys[i]]) !== "function" && typeof(this[dataKeys[i]]) !== "function") {
-            this[dataKeys[i]] = data[dataKeys[i]];
-          }
+    // ── Push validated state to UI (replaces old Object.keys brute-force) ───
+    if (this.gameUI.applyState) {
+      this.gameUI.applyState(patch, message);
+    } else {
+      // Fallback for legacy UI that doesn't implement applyState
+      for (const key of allowedKeys) {
+        if (Object.prototype.hasOwnProperty.call(this.gameUI, key)) {
+          this.gameUI[key] = data[key];
         }
       }
+    }
 
-      if(Object.prototype.hasOwnProperty.call(data, "killed") && data.killed && this.gameUI && this.gameUI.setKill) {
-        this.gameUI.setKill();
+    // ── Update engine if requested ──────────────────────────────────────────
+    if (updateEngine) {
+      if (data.snakes && data.snakes[this.getCurrentPlayer()]) {
+        data.snakes[this.getCurrentPlayer()].lastKey = this.lastKey;
+        this.lastKey = -1;
+      }
+
+      if (data.grid) {
+        data.grid.rngGame = null;
+        data.grid.rngGrid = null;
+      }
+
+      for (const key of allowedKeys) {
+        this.updateEngine(key, data[key]);
+      }
+    }
+
+    // ── Sync controller's own properties ────────────────────────────────────
+    for (const key of allowedKeys) {
+      if (Object.prototype.hasOwnProperty.call(this, key) && typeof this[key] !== "function") {
+        this[key] = data[key];
       }
     }
   }
